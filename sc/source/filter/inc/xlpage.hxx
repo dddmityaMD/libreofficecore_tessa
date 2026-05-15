@@ -22,6 +22,8 @@
 #include <tools/gen.hxx>
 #include "ftools.hxx"
 #include <memory>
+#include <vector>
+#include <address.hxx>
 
 // Constants and Enumerations =================================================
 
@@ -150,6 +152,14 @@ struct XclPageData
     bool                mbVerCenter;        /// true = centered vertically; false = top aligned.
     bool                mbPrintHeadings;    /// true = print column and row headings.
     bool                mbPrintGrid;        /// true = print grid lines.
+
+    /// Raw OOXML printerSettings DEVMODE blob carried back from xlsx
+    /// import so xlsx export can round-trip it. Empty when source had
+    /// no printerSettings relation on this worksheet.
+    std::vector<sal_uInt8> maOoxPrinterSettingsBin;
+    /// Sheet tab index — used to compose the printerSettings(N+1).bin
+    /// part name when re-emitting the binary blob on save.
+    SCTAB               mnOoxSheetIndex = -1;
 
     explicit            XclPageData();
                         ~XclPageData();

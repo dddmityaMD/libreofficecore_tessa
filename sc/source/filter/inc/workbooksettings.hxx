@@ -108,6 +108,14 @@ public:
     /** Returns the nulldate of this workbook. */
     css::util::Date const & getNullDate() const;
 
+    /** Returns the in-progress ScExtDocOptions accumulator for the import.
+        Per-sheet passthrough state (e.g. printerSettings binary blobs)
+        should be written here during import; the destructor copies the
+        accumulator onto the ScDocument. Writing to
+        ScDocument::SetExtDocOptions earlier in the import trips the
+        assertion in ~WorkbookSettings(). */
+    ScExtDocOptions& getExtDocOptions() { return maExtDocOptions; }
+
 private:
     /** Updates date mode and unit converter nulldate. */
     void                setDateMode( bool bDateMode1904, bool bDateCompatibility=true );

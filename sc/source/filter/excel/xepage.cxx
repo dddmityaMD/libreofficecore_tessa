@@ -28,12 +28,17 @@
 #include <editeng/lrspitem.hxx>
 #include <editeng/ulspitem.hxx>
 #include <editeng/brushitem.hxx>
+#include <oox/core/relations.hxx>
 #include <oox/export/utils.hxx>
+#include <oox/token/namespaces.hxx>
 #include <oox/token/tokens.hxx>
 #include <sax/fastattribs.hxx>
+#include <com/sun/star/io/XOutputStream.hpp>
 #include <document.hxx>
+#include <scextopt.hxx>
 #include <stlpool.hxx>
 #include <attrib.hxx>
+#include <xestream.hxx>
 #include <xehelper.hxx>
 #include <xeescher.hxx>
 #include <xltools.hxx>
@@ -128,7 +133,45 @@ void XclExpSetup::SaveXml( XclExpXmlStream& rStrm )
     pAttrList->add( XML_horizontalDpi,      OString::number(  mrData.mnHorPrintRes ) );
     pAttrList->add( XML_verticalDpi,        OString::number(  mrData.mnVerPrintRes ) );
     pAttrList->add( XML_copies,             OString::number(  mrData.mnCopies ) );
-    // OOXTODO: devMode settings part RelationshipId: FSNS( XML_r, XML_id ),
+
+    // If the worksheet had an OOXML printerSettings DEVMODE blob at import
+    // time (carried on ScExtTabSettings::maOoxPrinterSettingsBin and copied
+    // into XclPageData by the page-settings ctor), emit the binary back
+    // into the package as xl/printerSettings/printerSettings(N+1).bin,
+    // create a worksheet-level relationship to it, and reference the rId
+    // on <pageSetup r:id="…"/>. This is byte-passthrough — the DEVMODE is
+    // not introspected. If a user changed page setup attributes in LO,
+    // those attributes win on the <pageSetup> outer element; only the
+    // printer driver state (custom trays, duplex, custom paper sizes)
+    // sits inside the blob, and re-shipping it lets Excel re-establish
+    // those settings on the next print.
+    if (!mrData.maOoxPrinterSettingsBin.empty() && mrData.mnOoxSheetIndex >= 0)
+    {
+        const sal_Int32 nPartIdx = static_cast<sal_Int32>(mrData.mnOoxSheetIndex) + 1;
+        const OUString aPath = "xl/printerSettings/printerSettings"
+            + OUString::number(nPartIdx) + ".bin";
+        const OUString aMediaType
+            = u"application/vnd.openxmlformats-officedocument.spreadsheetml.printerSettings"_ustr;
+
+        css::uno::Reference<css::io::XOutputStream> xOut
+            = rStrm.openFragmentStream(aPath, aMediaType);
+        if (xOut.is())
+        {
+            const css::uno::Sequence<sal_Int8> aSeq(
+                reinterpret_cast<const sal_Int8*>(mrData.maOoxPrinterSettingsBin.data()),
+                static_cast<sal_Int32>(mrData.maOoxPrinterSettingsBin.size()));
+            xOut->writeBytes(aSeq);
+            xOut->closeOutput();
+
+            const OUString aTarget
+                = "../printerSettings/printerSettings" + OUString::number(nPartIdx) + ".bin";
+            const OUString aRelId = rStrm.addRelation(
+                rStrm.GetCurrentStream()->getOutputStream(),
+                CREATE_OFFICEDOC_RELATION_TYPE("printerSettings"),
+                aTarget);
+            pAttrList->add(FSNS(XML_r, XML_id), aRelId.toUtf8());
+        }
+    }
 
     rStrm.GetCurrentStream()->singleElement( XML_pageSetup, pAttrList );
 }
@@ -232,6 +275,20 @@ XclExpPageSettings::XclExpPageSettings( const XclExpRoot& rRoot ) :
 {
     ScDocument& rDoc = GetDoc();
     SCTAB nScTab = GetCurrScTab();
+
+    maData.mnOoxSheetIndex = nScTab;
+    // Recover the OOXML printerSettings DEVMODE blob (if any) that was
+    // stashed on the per-sheet ScExtTabSettings during xlsx import. This
+    // gets re-emitted byte-identical in XclExpSetup::SaveXml so the
+    // customer's printer configuration survives a save in LO.
+    if (ScExtDocOptions* pExtOpt = rDoc.GetExtDocOptions())
+    {
+        if (const ScExtTabSettings* pTabSett = pExtOpt->GetTabSettings(nScTab))
+        {
+            if (!pTabSett->maOoxPrinterSettingsBin.empty())
+                maData.maOoxPrinterSettingsBin = pTabSett->maOoxPrinterSettingsBin;
+        }
+    }
 
     if( SfxStyleSheetBase* pStyleSheet = GetStyleSheetPool().Find( rDoc.GetPageStyle( nScTab ), SfxStyleFamily::Page ) )
     {

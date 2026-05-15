@@ -46,9 +46,12 @@
 #include <oox/core/relations.hxx>
 #include <stylesbuffer.hxx>
 #include <document.hxx>
+#include <scextopt.hxx>
+#include <workbooksettings.hxx>
 #include <biffhelper.hxx>
 #include <filter/msfilter/util.hxx>
 #include <o3tl/string_view.hxx>
+#include <com/sun/star/io/XInputStream.hpp>
 
 namespace oox::xls {
 
@@ -333,6 +336,48 @@ void PageSettings::finalizeImport()
     // Set page style name to the sheet.
     SCTAB nTab = getSheetIndex();
     rDoc.SetPageStyle(nTab, aStyleName);
+
+    // Stash the raw printerSettings DEVMODE blob on the WorkbookSettings's
+    // in-progress ScExtDocOptions accumulator so xlsx export (xepage.cxx)
+    // can re-emit it byte-identical. Without this LO silently drops
+    // xl/printerSettings/*.bin on save — the customer's printer driver
+    // state (custom trays, duplex, custom paper size, color profile) is
+    // lost across the round-trip.
+    //
+    // Write goes via getWorkbookSettings().getExtDocOptions() rather than
+    // ScDocument::SetExtDocOptions because the workbook-settings dtor
+    // unconditionally REPLACES the document's options object at the end
+    // of import (and asserts the document's options were null before).
+    if (!maModel.maBinSettPath.isEmpty())
+    {
+        css::uno::Reference<css::io::XInputStream> xIn
+            = getBaseFilter().openInputStream(maModel.maBinSettPath);
+        if (xIn.is())
+        {
+            std::vector<sal_uInt8> aBin;
+            css::uno::Sequence<sal_Int8> aBuf;
+            const sal_Int32 nChunk = 8192;
+            sal_Int32 nRead = 0;
+            do
+            {
+                nRead = xIn->readBytes(aBuf, nChunk);
+                if (nRead > 0)
+                {
+                    const sal_uInt8* pSrc
+                        = reinterpret_cast<const sal_uInt8*>(aBuf.getConstArray());
+                    aBin.insert(aBin.end(), pSrc, pSrc + nRead);
+                }
+            } while (nRead == nChunk);
+            xIn->closeInput();
+
+            if (!aBin.empty())
+            {
+                ScExtTabSettings& rTabSett
+                    = getWorkbookSettings().getExtDocOptions().GetOrCreateTabSettings(nTab);
+                rTabSett.maOoxPrinterSettingsBin = std::move(aBin);
+            }
+        }
+    }
 }
 
 void PageSettings::importPictureData( const Relations& rRelations, const OUString& rRelId )

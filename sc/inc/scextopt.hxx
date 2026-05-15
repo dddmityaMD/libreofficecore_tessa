@@ -19,6 +19,7 @@
 #pragma once
 
 #include <memory>
+#include <vector>
 #include <tools/gen.hxx>
 #include <tools/color.hxx>
 #include "rangelst.hxx"
@@ -66,6 +67,13 @@ struct ScExtTabSettings
     bool                mbFrozenPanes;      ///< true = Frozen panes; false = Normal splits.
     bool                mbPageMode;         ///< true = Pagebreak mode; false = Normal view mode.
     bool                mbShowGrid;         ///< Whether or not to display gridlines.
+
+    /** OOXML xl/printerSettings/printerSettingsN.bin raw DEVMODE blob.
+        Captured at xlsx import (pagesettings.cxx), re-emitted unchanged
+        at xlsx export (xepage.cxx) so customer print configuration
+        survives a round-trip through LO. Empty when source had no
+        printerSettings relation on the worksheet. */
+    std::vector<sal_uInt8> maOoxPrinterSettingsBin;
 
     explicit            ScExtTabSettings();
 };
