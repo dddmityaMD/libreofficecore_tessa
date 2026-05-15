@@ -166,6 +166,65 @@ const sal_uInt32 BIFF12_PTDEF_NOCUSTOMLISTSORT      = 0x00004000;
 const sal_uInt8 BIFF12_PTDEF_ROWAXIS                = 1;
 const sal_uInt8 BIFF12_PTDEF_COLAXIS                = 2;
 
+/// True if \p nType is one of the 14 OOXML caption-family filter tokens
+/// (captionEqual, captionNotEqual, captionBeginsWith, … captionNotBetween).
+bool isCaptionFilterType(sal_Int32 nType)
+{
+    switch (nType)
+    {
+        case XML_captionEqual:
+        case XML_captionNotEqual:
+        case XML_captionBeginsWith:
+        case XML_captionNotBeginsWith:
+        case XML_captionEndsWith:
+        case XML_captionNotEndsWith:
+        case XML_captionContains:
+        case XML_captionNotContains:
+        case XML_captionGreaterThan:
+        case XML_captionGreaterThanOrEqual:
+        case XML_captionLessThan:
+        case XML_captionLessThanOrEqual:
+        case XML_captionBetween:
+        case XML_captionNotBetween:
+            return true;
+        default:
+            return false;
+    }
+}
+
+/// Returns true if member caption \p rName satisfies the predicate of the
+/// caption-family filter \p nType with payload (\p rVal1, \p rVal2). Members
+/// for which this returns false are flagged via SetIsVisible(false) at
+/// import time so the pivot renders the filtered subset. Comparisons are
+/// case-sensitive (matches the captionNotEqual baseline; Excel itself does
+/// case-insensitive matching, but we preserve LO's existing behaviour for
+/// the parallel path).
+bool captionMatches(sal_Int32 nType, const OUString& rName,
+                    const OUString& rVal1, const OUString& rVal2)
+{
+    switch (nType)
+    {
+        case XML_captionEqual:              return rName == rVal1;
+        case XML_captionNotEqual:           return rName != rVal1;
+        case XML_captionBeginsWith:         return rName.startsWith(rVal1);
+        case XML_captionNotBeginsWith:      return !rName.startsWith(rVal1);
+        case XML_captionEndsWith:           return rName.endsWith(rVal1);
+        case XML_captionNotEndsWith:        return !rName.endsWith(rVal1);
+        case XML_captionContains:           return rName.indexOf(rVal1) >= 0;
+        case XML_captionNotContains:        return rName.indexOf(rVal1) < 0;
+        case XML_captionGreaterThan:        return rName.compareTo(rVal1) > 0;
+        case XML_captionGreaterThanOrEqual: return rName.compareTo(rVal1) >= 0;
+        case XML_captionLessThan:           return rName.compareTo(rVal1) < 0;
+        case XML_captionLessThanOrEqual:    return rName.compareTo(rVal1) <= 0;
+        case XML_captionBetween:
+            return rName.compareTo(rVal1) >= 0 && rName.compareTo(rVal2) <= 0;
+        case XML_captionNotBetween:
+            return rName.compareTo(rVal1) < 0 || rName.compareTo(rVal2) > 0;
+        default:
+            return true; // Unknown — defensive: keep visible.
+    }
+}
+
 } // namespace
 
 PTFieldItemModel::PTFieldItemModel() :
@@ -1052,7 +1111,7 @@ void PivotTableFilter::finalizeImport()
         return;
     }
 
-    if( maModel.mnType == XML_captionNotEqual )
+    if (isCaptionFilterType(maModel.mnType))
     {
         const PivotCacheField* pCacheField = mrPivotTable.getCacheField( maModel.mnField );
         if( !pCacheField )
@@ -1067,12 +1126,29 @@ void PivotTableFilter::finalizeImport()
         if( !pDim )
             return;
 
-        const OUString& rTarget = maModel.maStrValue1;
-        for( ScDPSaveMember* pMember : pDim->GetMembers() )
+        // Hide members for which the caption predicate evaluates false; the
+        // visible-after-filter set is the predicate's truthy subset.
+        for (ScDPSaveMember* pMember : pDim->GetMembers())
         {
-            if( pMember && pMember->GetName() == rTarget )
-                pMember->SetIsVisible( false );
+            if (!pMember)
+                continue;
+            if (!captionMatches(maModel.mnType, pMember->GetName(),
+                                maModel.maStrValue1, maModel.maStrValue2))
+                pMember->SetIsVisible(false);
         }
+
+        // Carry the filter metadata so xepivotxml can write the <filters>
+        // block on save. Without this the filter type is lost and the
+        // consumer sees only unexplained hidden members. evalOrder and id
+        // round-trip from the source xml rather than being synthesised.
+        ScPivotFilterRule aRule;
+        aRule.mnTypeToken    = maModel.mnType;
+        aRule.maStringValue1 = maModel.maStrValue1;
+        aRule.maStringValue2 = maModel.maStrValue2;
+        aRule.mnMeasureField = maModel.mnMeasureField;
+        aRule.mnEvalOrder    = maModel.mnEvalOrder;
+        aRule.mnId           = maModel.mnId;
+        pDim->AddFilterRule(std::move(aRule));
     }
 }
 

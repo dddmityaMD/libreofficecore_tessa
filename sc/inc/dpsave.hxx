@@ -51,6 +51,27 @@ namespace tools { class XmlWriter; }
 
 // classes to save Data Pilot settings
 
+/// One OOXML pivot-table <filter type="…"> rule carried on a save dimension
+/// so xlsx export can round-trip the rule back. Phase A (caption family)
+/// only populates caption types; value/date families are scoped for later
+/// phases but the struct already carries their fields.
+struct ScPivotFilterRule
+{
+    /// OOXML token e.g. XML_captionNotEqual, XML_captionBetween. 0 = unset.
+    sal_Int32 mnTypeToken = 0;
+    /// Primary payload — caption string, ISO date, or stringified numeric.
+    OUString  maStringValue1;
+    /// Upper bound for *Between / *NotBetween filter types.
+    OUString  maStringValue2;
+    /// Data field referenced by value-family filters. -1 = unused.
+    sal_Int32 mnMeasureField = -1;
+    /// Original <filter evalOrder="…"> — preserved so save round-trips it
+    /// rather than emitting a hardcoded "-1".
+    sal_Int32 mnEvalOrder = -1;
+    /// Original <filter id="…"> — preserved rather than synthesised on save.
+    sal_Int32 mnId = 0;
+};
+
 class ScDPSaveMember
 {
 private:
@@ -101,6 +122,9 @@ private:
     OUString aName;
     std::optional<OUString> mpLayoutName;
     std::optional<OUString> mpSubtotalName;
+    /// OOXML <filters> rules attached to this dimension. Round-tripped on
+    /// xlsx save by xepivotxml. Populated by pivottablebuffer on import.
+    std::vector<ScPivotFilterRule> maFilterRules;
     bool bIsDataLayout;
     bool bDupFlag;
     css::sheet::DataPilotFieldOrientation nOrientation;
@@ -180,6 +204,16 @@ public:
     SC_DLLPUBLIC void SetSubtotalName(const OUString& rName);
     SC_DLLPUBLIC const std::optional<OUString> & GetSubtotalName() const;
     void RemoveSubtotalName();
+    /// OOXML <filter type="…"> rules carried back to xlsx save. Phase A
+    /// populates caption-family entries; for those, the matching member
+    /// is also flagged via SetIsVisible(false) at import time. This vector
+    /// preserves the original filter metadata (type, payload, evalOrder,
+    /// id) so xepivotxml can re-emit the <filters> element shape.
+    SC_DLLPUBLIC void AddFilterRule(ScPivotFilterRule aRule);
+    const std::vector<ScPivotFilterRule>& GetFilterRules() const
+        { return maFilterRules; }
+    void ClearFilterRules()
+        { maFilterRules.clear(); }
 
     bool IsMemberNameInUse(const OUString& rName) const;
 

@@ -214,6 +214,7 @@ ScDPSaveDimension::ScDPSaveDimension(const ScDPSaveDimension& r) :
     aName( r.aName ),
     mpLayoutName( r.mpLayoutName ),
     mpSubtotalName( r.mpSubtotalName ),
+    maFilterRules( r.maFilterRules ),
     bIsDataLayout( r.bIsDataLayout ),
     bDupFlag( r.bDupFlag ),
     nOrientation( r.nOrientation ),
@@ -408,6 +409,11 @@ const std::optional<OUString> & ScDPSaveDimension::GetLayoutName() const
 void ScDPSaveDimension::RemoveLayoutName()
 {
     mpLayoutName.reset();
+}
+
+void ScDPSaveDimension::AddFilterRule(ScPivotFilterRule aRule)
+{
+    maFilterRules.push_back(std::move(aRule));
 }
 
 void ScDPSaveDimension::SetReferenceValue(const sheet::DataPilotFieldReference* pNew)

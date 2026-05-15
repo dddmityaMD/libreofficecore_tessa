@@ -905,6 +905,106 @@ sal_Int32 GetSubtotalAttrToken(ScGeneralFunction eFunc)
     return XML_defaultSubtotal;
 }
 
+/// OOXML outer <filter type="…"> name for a caption-family token, or
+/// nullptr if the token is not a caption filter Phase A knows how to emit.
+const char* GetCaptionFilterTypeName(sal_Int32 nTypeToken)
+{
+    switch (nTypeToken)
+    {
+        case XML_captionEqual:              return "captionEqual";
+        case XML_captionNotEqual:           return "captionNotEqual";
+        case XML_captionBeginsWith:         return "captionBeginsWith";
+        case XML_captionNotBeginsWith:      return "captionNotBeginsWith";
+        case XML_captionEndsWith:           return "captionEndsWith";
+        case XML_captionNotEndsWith:        return "captionNotEndsWith";
+        case XML_captionContains:           return "captionContains";
+        case XML_captionNotContains:        return "captionNotContains";
+        case XML_captionGreaterThan:        return "captionGreaterThan";
+        case XML_captionGreaterThanOrEqual: return "captionGreaterThanOrEqual";
+        case XML_captionLessThan:           return "captionLessThan";
+        case XML_captionLessThanOrEqual:    return "captionLessThanOrEqual";
+        case XML_captionBetween:            return "captionBetween";
+        case XML_captionNotBetween:         return "captionNotBetween";
+        default:                            return nullptr;
+    }
+}
+
+/// Emit the <customFilter> child rows for a caption-family rule. Most
+/// types are one row; *Between / *NotBetween emit two rows (lower + upper).
+/// Wildcards (`*`/`?`) encode contains/beginsWith/endsWith semantics in
+/// the customFilter val= attribute (Excel's encoding — see ECMA-376-1
+/// 18.3.2.6).
+void WriteCaptionCustomFilters(const sax_fastparser::FSHelperPtr& rStrm,
+                               sal_Int32 nTypeToken,
+                               const OUString& rVal1,
+                               const OUString& rVal2)
+{
+    const OString aVal1 = rVal1.toUtf8();
+    const OString aVal2 = rVal2.toUtf8();
+
+    auto emitRow = [&](const char* pOp, const OString& rVal)
+    {
+        rStrm->singleElement(XML_customFilter,
+            XML_operator, pOp,
+            XML_val, rVal);
+    };
+
+    switch (nTypeToken)
+    {
+        case XML_captionEqual:
+            emitRow("equal", aVal1);
+            break;
+        case XML_captionNotEqual:
+            emitRow("notEqual", aVal1);
+            break;
+        case XML_captionBeginsWith:
+            emitRow("equal", aVal1 + "*"_ostr);
+            break;
+        case XML_captionNotBeginsWith:
+            emitRow("notEqual", aVal1 + "*"_ostr);
+            break;
+        case XML_captionEndsWith:
+            emitRow("equal", "*"_ostr + aVal1);
+            break;
+        case XML_captionNotEndsWith:
+            emitRow("notEqual", "*"_ostr + aVal1);
+            break;
+        case XML_captionContains:
+            emitRow("equal", "*"_ostr + aVal1 + "*"_ostr);
+            break;
+        case XML_captionNotContains:
+            emitRow("notEqual", "*"_ostr + aVal1 + "*"_ostr);
+            break;
+        case XML_captionGreaterThan:
+            emitRow("greaterThan", aVal1);
+            break;
+        case XML_captionGreaterThanOrEqual:
+            emitRow("greaterThanOrEqual", aVal1);
+            break;
+        case XML_captionLessThan:
+            emitRow("lessThan", aVal1);
+            break;
+        case XML_captionLessThanOrEqual:
+            emitRow("lessThanOrEqual", aVal1);
+            break;
+        case XML_captionBetween:
+            // <filter type="captionBetween"> means val1 <= caption <= val2.
+            // Excel encodes this as two customFilter rows joined implicitly
+            // by AND.
+            emitRow("greaterThanOrEqual", aVal1);
+            emitRow("lessThanOrEqual", aVal2);
+            break;
+        case XML_captionNotBetween:
+            // val < val1 OR val > val2; Excel uses two rows + customFilters
+            // and="0" (default and="0" means OR).
+            emitRow("lessThan", aVal1);
+            emitRow("greaterThan", aVal2);
+            break;
+        default:
+            break;
+    }
+}
+
 /** Data for one row/column item entry that will be written to OOXML file */
 struct RowOrColumnItemsData
 {
@@ -1702,6 +1802,73 @@ void XclExpXmlPivotTables::SavePivotTableXml( XclExpXmlStream& rStrm, const ScDP
                                   XML_showRowHeaders, "1", XML_showColHeaders, "1",
                                   XML_showRowStripes, "0", XML_showColStripes, "0",
                                   XML_showLastColumn, "1");
+    }
+
+    // <filters> — write back any filter rules the import side stashed on
+    // the dimensions. Without this the filter type is lost on save
+    // (members stay hidden but the consumer can't recover the rule).
+    // Phase A handles the 14 caption-family types; value/date families
+    // are scoped for later phases. evalOrder and id round-trip from the
+    // source xml rather than being synthesised.
+    {
+        struct ExportFilter
+        {
+            size_t                  nField;
+            const ScPivotFilterRule* pRule;
+        };
+        std::vector<ExportFilter> aFilters;
+        for (size_t i = 0; i < aCachedDims.size(); ++i)
+        {
+            if (!aCachedDims[i])
+                continue;
+            for (const ScPivotFilterRule& rRule : aCachedDims[i]->GetFilterRules())
+                aFilters.push_back({i, &rRule});
+        }
+        if (!aFilters.empty())
+        {
+            pPivotStrm->startElement(XML_filters,
+                XML_count, OString::number(static_cast<tools::Long>(aFilters.size())));
+            sal_Int32 nSynthId = 1;
+            for (const ExportFilter& rEntry : aFilters)
+            {
+                const ScPivotFilterRule& rRule = *rEntry.pRule;
+                const char* pOuterType = GetCaptionFilterTypeName(rRule.mnTypeToken);
+                if (!pOuterType)
+                    continue; // Non-caption rule — value/date families come later.
+                const sal_Int32 nEmitId = rRule.mnId > 0 ? rRule.mnId : nSynthId++;
+                const bool bIsBetween = rRule.mnTypeToken == XML_captionBetween
+                                     || rRule.mnTypeToken == XML_captionNotBetween;
+
+                auto pFilterAttrs = sax_fastparser::FastSerializerHelper::createAttrList();
+                pFilterAttrs->add(XML_fld,
+                    OString::number(static_cast<tools::Long>(rEntry.nField)));
+                pFilterAttrs->add(XML_type, pOuterType);
+                pFilterAttrs->add(XML_evalOrder, OString::number(rRule.mnEvalOrder));
+                pFilterAttrs->add(XML_id, OString::number(nEmitId));
+                pFilterAttrs->add(XML_stringValue1, rRule.maStringValue1.toUtf8());
+                if (bIsBetween)
+                    pFilterAttrs->add(XML_stringValue2, rRule.maStringValue2.toUtf8());
+                pPivotStrm->startElement(XML_filter, pFilterAttrs);
+
+                pPivotStrm->startElement(XML_autoFilter, XML_ref, "A1");
+                pPivotStrm->startElement(XML_filterColumn, XML_colId, OString("0"));
+                // captionBetween is AND (val1 <= x <= val2); all the other
+                // caption types — including captionNotBetween (encoded as
+                // x<val1 OR x>val2) — are OR (the default when and= is
+                // omitted).
+                if (rRule.mnTypeToken == XML_captionBetween)
+                    pPivotStrm->startElement(XML_customFilters, XML_and, "1");
+                else
+                    pPivotStrm->startElement(XML_customFilters);
+                WriteCaptionCustomFilters(pPivotStrm, rRule.mnTypeToken,
+                                          rRule.maStringValue1, rRule.maStringValue2);
+                pPivotStrm->endElement(XML_customFilters);
+                pPivotStrm->endElement(XML_filterColumn);
+                pPivotStrm->endElement(XML_autoFilter);
+                pPivotStrm->endElement(XML_filter);
+            }
+            pPivotStrm->endElement(XML_filters);
+        }
     }
 
     OUString aBuf = "../pivotCache/pivotCacheDefinition" +
