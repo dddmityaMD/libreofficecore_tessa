@@ -194,6 +194,7 @@ ContextHandlerRef PivotTableFragment::onCreateContext( sal_Int32 nElement, const
                 case XLS_TOKEN(dataFields):
                 case XLS_TOKEN(filters):
                 case XLS_TOKEN(formats):
+                case XLS_TOKEN(extLst):
                     return this;
                 case XLS_TOKEN(pivotTableStyleInfo):
                 {
@@ -237,6 +238,16 @@ ContextHandlerRef PivotTableFragment::onCreateContext( sal_Int32 nElement, const
         case XLS_TOKEN(formats):
             if (nElement == XLS_TOKEN(format))
                 return new PivotTableFormatContext(*this, mrPivotTable.createFormat());
+        break;
+
+        // <x:extLst> wraps Microsoft <x:ext>; descend into <x14:pivotTableDefinition>
+        // so we can capture hideValuesRow for AlterOffice xlsx round-trip.
+        case XLS_TOKEN( extLst ):
+            if( nElement == XLS_TOKEN( ext ) ) return this;
+        break;
+        case XLS_TOKEN( ext ):
+            if( nElement == XLS14_TOKEN( pivotTableDefinition ) )
+                mrPivotTable.importPivotTableDefinitionX14( rAttribs );
         break;
     }
     return nullptr;

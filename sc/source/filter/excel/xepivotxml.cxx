@@ -1342,7 +1342,10 @@ void XclExpXmlPivotTables::SavePivotTableXml( XclExpXmlStream& rStrm, const ScDP
     pTableDefAttList->add(XML_applyFontFormats, ToPsz10(false));
     pTableDefAttList->add(XML_applyPatternFormats, ToPsz10(false));
     pTableDefAttList->add(XML_applyAlignmentFormats, ToPsz10(false));
-    pTableDefAttList->add(XML_applyWidthHeightFormats, ToPsz10(false));
+    // applyWidthHeightFormats: if the import captured the source value,
+    // round-trip verbatim. Otherwise emit the hardcoded LO default of "0".
+    pTableDefAttList->add(XML_applyWidthHeightFormats,
+        ToPsz10(rDPObj.GetOoxApplyWidthHeightFormats().value_or(false)));
     {
         const OUString& rDataCaption = rDPObj.GetDataCaption();
         pTableDefAttList->add(XML_dataCaption,
@@ -1359,6 +1362,24 @@ void XclExpXmlPivotTables::SavePivotTableXml( XclExpXmlStream& rStrm, const ScDP
     if (!rDPObj.GetRowHeaderCaption().isEmpty())
         pTableDefAttList->add(XML_rowHeaderCaption, rDPObj.GetRowHeaderCaption().toUtf8());
     pTableDefAttList->add(XML_preserveFormatting, ToPsz10(true));
+    // AlterOffice xlsx round-trip: emit the four behaviour attributes that
+    // LO doesn't model internally but Excel's pivot UI reads. Only emitted
+    // if the import side captured them on this file — otherwise we let
+    // Excel's spec defaults apply (which differ per attribute: gridDropZones
+    // and fieldPrintTitles default to false, multipleFieldFilters and
+    // showDataTips default to true).
+    if (rDPObj.GetOoxGridDropZones().has_value())
+        pTableDefAttList->add(XML_gridDropZones,
+            ToPsz10(*rDPObj.GetOoxGridDropZones()));
+    if (rDPObj.GetOoxFieldPrintTitles().has_value())
+        pTableDefAttList->add(XML_fieldPrintTitles,
+            ToPsz10(*rDPObj.GetOoxFieldPrintTitles()));
+    if (rDPObj.GetOoxMultipleFieldFilters().has_value())
+        pTableDefAttList->add(XML_multipleFieldFilters,
+            ToPsz10(*rDPObj.GetOoxMultipleFieldFilters()));
+    if (rDPObj.GetOoxShowDataTips().has_value())
+        pTableDefAttList->add(XML_showDataTips,
+            ToPsz10(*rDPObj.GetOoxShowDataTips()));
     pPivotStrm->startElement(XML_pivotTableDefinition, pTableDefAttList);
 
     // NB: Excel's range does not include page field area (if any).
@@ -1869,6 +1890,30 @@ void XclExpXmlPivotTables::SavePivotTableXml( XclExpXmlStream& rStrm, const ScDP
             }
             pPivotStrm->endElement(XML_filters);
         }
+    }
+
+    // AlterOffice xlsx round-trip: re-emit the <extLst><ext><x14:pivotTableDefinition
+    // hideValuesRow="…"/></ext></extLst> block when the import side captured
+    // hideValuesRow. This controls whether Excel's pivot UI shows the
+    // multi-data-field "Values" header row (in the customer file:
+    // "Значения"). Without this re-emission Excel re-introduces the row
+    // that the source had hidden.
+    if (rDPObj.GetOoxHideValuesRow().has_value())
+    {
+        pPivotStrm->startElement(XML_extLst);
+        pPivotStrm->startElement(XML_ext,
+            FSNS(XML_xmlns, XML_x14), rStrm.getNamespaceURL(OOX_NS(xls14Lst)).toUtf8(),
+            XML_uri, OString("{962EF5D1-5CA2-4c93-8EF4-DBF5C05439D2}"));
+        // Excel-produced files declare xmlns:xm on <x14:pivotTableDefinition>
+        // even though they don't use any xm:foo qualified attribute inside.
+        // Empirically Excel reads hideValuesRow correctly only when the xm
+        // namespace is in scope here (without it, ShowValuesRow doesn't
+        // flip in the Excel UI). Match Excel's own emit pattern.
+        pPivotStrm->singleElement(FSNS(XML_x14, XML_pivotTableDefinition),
+            FSNS(XML_xmlns, XML_xm), rStrm.getNamespaceURL(OOX_NS(xm)).toUtf8(),
+            XML_hideValuesRow, ToPsz10(*rDPObj.GetOoxHideValuesRow()));
+        pPivotStrm->endElement(XML_ext);
+        pPivotStrm->endElement(XML_extLst);
     }
 
     OUString aBuf = "../pivotCache/pivotCacheDefinition" +

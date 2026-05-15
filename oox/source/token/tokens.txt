@@ -2772,6 +2772,7 @@ hidePivotFieldList
 hideRight
 hideSpellingErrors
 hideTop
+hideValuesRow
 hier
 hierAlign
 hierBranch

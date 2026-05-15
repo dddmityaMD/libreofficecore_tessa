@@ -274,6 +274,20 @@ struct PTDefinitionModel : public AutoFormatModel
     bool                mbColGrandTotals;
     bool                mbFieldPrintTitles;
     bool                mbItemPrintTitles;
+    /// AlterOffice extension: round-trip these <pivotTableDefinition>
+    /// attributes verbatim so customer-side Excel pivot UI behaviour
+    /// (grid drop zones, filter UI, data tips, width/height formats,
+    /// "Values" header row visibility) survives a LO save.
+    bool                mbGridDropZones;
+    bool                mbMultipleFieldFilters;
+    bool                mbShowDataTips;
+    bool                mbHasGridDropZones;
+    bool                mbHasFieldPrintTitles;
+    bool                mbHasMultipleFieldFilters;
+    bool                mbHasShowDataTips;
+    bool                mbHasApplyWidthHeightFormats;
+    bool                mbHideValuesRow;
+    bool                mbHasHideValuesRow;
     bool                mbMergeItem;
     bool                mbShowEmptyRow;
     bool                mbShowEmptyCol;
@@ -303,6 +317,10 @@ public:
 
     /** Reads global pivot table settings from the pivotTableDefinition element. */
     void                importPivotTableDefinition( const AttributeList& rAttribs );
+    /** Reads <x14:pivotTableDefinition> inside the outer <extLst><ext> of
+        the pivotTableDefinition — used to capture hideValuesRow for
+        AlterOffice xlsx round-trip. */
+    void                importPivotTableDefinitionX14( const AttributeList& rAttribs );
     /** Reads the location of the pivot table from the location element. */
     void                importLocation( const AttributeList& rAttribs, sal_Int16 nSheet );
     /** Reads the index of a field located in the row dimension. */

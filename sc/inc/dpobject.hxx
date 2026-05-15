@@ -32,6 +32,7 @@
 #include <unotools/resmgr.hxx>
 
 #include <memory>
+#include <optional>
 #include <vector>
 #include <map>
 
@@ -142,6 +143,20 @@ private:
     OUString maColHeaderCaption;  // OOXML <x:pivotTableDefinition colHeaderCaption="…">
     OUString maDataCaption;       // OOXML <x:pivotTableDefinition dataCaption="…">
 
+    // OOXML <x:pivotTableDefinition> behaviour flags that LO does not model
+    // natively. Captured at import, re-emitted on xlsx save so Excel-side
+    // pivot UI behaviour survives a round-trip. Each is std::optional so
+    // we can distinguish "source had this attribute" (emit verbatim) from
+    // "source did not set it" (let LO's hardcoded default win).
+    std::optional<bool> moGridDropZones;          // gridDropZones=
+    std::optional<bool> moFieldPrintTitles;       // fieldPrintTitles=
+    std::optional<bool> moMultipleFieldFilters;   // multipleFieldFilters=
+    std::optional<bool> moShowDataTips;           // showDataTips=
+    std::optional<bool> moApplyWidthHeightFormats;// applyWidthHeightFormats=
+    // <extLst><ext><x14:pivotTableDefinition hideValuesRow="…"/></ext></extLst>:
+    // hides the "Values" data-field header row in Excel's pivot view.
+    std::optional<bool> moHideValuesRow;
+
     sc::PivotTableStyleInfo maStyleInfo;
 
     void              CreateObjects();
@@ -196,6 +211,21 @@ public:
     /// Override for the data-area "Values" caption (OOXML dataCaption attribute).
     void SetDataCaption(const OUString& rCaption) { maDataCaption = rCaption; }
     const OUString& GetDataCaption() const { return maDataCaption; }
+
+    /// Captured-on-import OOXML behaviour flags for round-trip preservation.
+    /// See member declarations for what each controls in Excel.
+    void SetOoxGridDropZones(bool b)         { moGridDropZones = b; }
+    void SetOoxFieldPrintTitles(bool b)      { moFieldPrintTitles = b; }
+    void SetOoxMultipleFieldFilters(bool b)  { moMultipleFieldFilters = b; }
+    void SetOoxShowDataTips(bool b)          { moShowDataTips = b; }
+    void SetOoxApplyWidthHeightFormats(bool b){ moApplyWidthHeightFormats = b; }
+    void SetOoxHideValuesRow(bool b)         { moHideValuesRow = b; }
+    const std::optional<bool>& GetOoxGridDropZones() const          { return moGridDropZones; }
+    const std::optional<bool>& GetOoxFieldPrintTitles() const       { return moFieldPrintTitles; }
+    const std::optional<bool>& GetOoxMultipleFieldFilters() const   { return moMultipleFieldFilters; }
+    const std::optional<bool>& GetOoxShowDataTips() const           { return moShowDataTips; }
+    const std::optional<bool>& GetOoxApplyWidthHeightFormats() const{ return moApplyWidthHeightFormats; }
+    const std::optional<bool>& GetOoxHideValuesRow() const          { return moHideValuesRow; }
 
     SC_DLLPUBLIC void   SetSheetDesc(const ScSheetSourceDesc& rDesc);
     void                SetImportDesc(const ScImportSourceDesc& rDesc);

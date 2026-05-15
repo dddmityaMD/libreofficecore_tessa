@@ -337,6 +337,12 @@ ScDPObject::ScDPObject(const ScDPObject& rOther)
     , maRowHeaderCaption(rOther.maRowHeaderCaption)
     , maColHeaderCaption(rOther.maColHeaderCaption)
     , maDataCaption(rOther.maDataCaption)
+    , moGridDropZones(rOther.moGridDropZones)
+    , moFieldPrintTitles(rOther.moFieldPrintTitles)
+    , moMultipleFieldFilters(rOther.moMultipleFieldFilters)
+    , moShowDataTips(rOther.moShowDataTips)
+    , moApplyWidthHeightFormats(rOther.moApplyWidthHeightFormats)
+    , moHideValuesRow(rOther.moHideValuesRow)
     , maStyleInfo(rOther.maStyleInfo)
 {
     if (rOther.mpSaveData)
@@ -374,6 +380,12 @@ ScDPObject& ScDPObject::operator= (const ScDPObject& rOther)
         maRowHeaderCaption = rOther.maRowHeaderCaption;
         maColHeaderCaption = rOther.maColHeaderCaption;
         maDataCaption = rOther.maDataCaption;
+        moGridDropZones = rOther.moGridDropZones;
+        moFieldPrintTitles = rOther.moFieldPrintTitles;
+        moMultipleFieldFilters = rOther.moMultipleFieldFilters;
+        moShowDataTips = rOther.moShowDataTips;
+        moApplyWidthHeightFormats = rOther.moApplyWidthHeightFormats;
+        moHideValuesRow = rOther.moHideValuesRow;
         maStyleInfo = rOther.maStyleInfo;
 
         if (rOther.mpSaveData)

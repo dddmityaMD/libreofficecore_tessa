@@ -1181,7 +1181,17 @@ PTDefinitionModel::PTDefinitionModel() :
     mbShowEmptyCol( false ),
     mbShowHeaders( true ),
     mbFieldListSortAsc( false ),
-    mbCustomListSort( true )
+    mbCustomListSort( true ),
+    mbGridDropZones( false ),
+    mbMultipleFieldFilters( true ),  // ECMA-376 default
+    mbShowDataTips( true ),          // ECMA-376 default
+    mbHasGridDropZones( false ),
+    mbHasFieldPrintTitles( false ),
+    mbHasMultipleFieldFilters( false ),
+    mbHasShowDataTips( false ),
+    mbHasApplyWidthHeightFormats( false ),
+    mbHideValuesRow( false ),
+    mbHasHideValuesRow( false )
 {
 }
 
@@ -1238,6 +1248,7 @@ void PivotTable::importPivotTableDefinition( const AttributeList& rAttribs )
     maDefModel.mbRowGrandTotals      = rAttribs.getBool( XML_rowGrandTotals, true );
     maDefModel.mbColGrandTotals      = rAttribs.getBool( XML_colGrandTotals, true );
     maDefModel.mbFieldPrintTitles    = rAttribs.getBool( XML_fieldPrintTitles, false );
+    maDefModel.mbHasFieldPrintTitles = rAttribs.hasAttribute( XML_fieldPrintTitles );
     maDefModel.mbItemPrintTitles     = rAttribs.getBool( XML_itemPrintTitles, false );
     maDefModel.mbMergeItem           = rAttribs.getBool( XML_mergeItem, false );
     maDefModel.mbShowEmptyRow        = rAttribs.getBool( XML_showEmptyRow, false );
@@ -1252,6 +1263,33 @@ void PivotTable::importPivotTableDefinition( const AttributeList& rAttribs )
     maDefModel.mbApplyFill           = rAttribs.getBool( XML_applyPatternFormats, false );
     // OOXML and BIFF12 documentation differ: OOXML mentions width/height, BIFF12 mentions protection
     maDefModel.mbApplyProtection     = rAttribs.getBool( XML_applyWidthHeightFormats, false );
+    maDefModel.mbHasApplyWidthHeightFormats = rAttribs.hasAttribute( XML_applyWidthHeightFormats );
+
+    // AlterOffice round-trip extensions: these four behaviour-flag attributes
+    // are not modelled in LO's pivot but influence Excel's pivot UI (grid
+    // drop zones, multi-field filter, data tip popovers). We capture verbatim
+    // and re-emit on xlsx save so customer-side Excel behaviour survives a
+    // round-trip. Each carries a paired mbHas… flag so we can distinguish
+    // "absent on source" from "set to false on source".
+    maDefModel.mbGridDropZones       = rAttribs.getBool( XML_gridDropZones, false );
+    maDefModel.mbHasGridDropZones    = rAttribs.hasAttribute( XML_gridDropZones );
+    maDefModel.mbMultipleFieldFilters    = rAttribs.getBool( XML_multipleFieldFilters, true );
+    maDefModel.mbHasMultipleFieldFilters = rAttribs.hasAttribute( XML_multipleFieldFilters );
+    maDefModel.mbShowDataTips        = rAttribs.getBool( XML_showDataTips, true );
+    maDefModel.mbHasShowDataTips     = rAttribs.hasAttribute( XML_showDataTips );
+}
+
+void PivotTable::importPivotTableDefinitionX14( const AttributeList& rAttribs )
+{
+    // <x14:pivotTableDefinition> sits inside <extLst><ext> on the outer
+    // pivotTableDefinition. ECMA-376-1 §18.10 defines hideValuesRow here
+    // (controls whether Excel renders the multi-data-field "Values"
+    // header row).
+    if (rAttribs.hasAttribute( XML_hideValuesRow ))
+    {
+        maDefModel.mbHideValuesRow    = rAttribs.getBool( XML_hideValuesRow, false );
+        maDefModel.mbHasHideValuesRow = true;
+    }
 }
 
 void PivotTable::importLocation( const AttributeList& rAttribs, sal_Int16 nSheet )
@@ -1526,6 +1564,23 @@ void PivotTable::finalizeImport()
         mpDPObject->SetRowHeaderCaption(maDefModel.maRowHeaderCaption);
         mpDPObject->SetColHeaderCaption(maDefModel.maColHeaderCaption);
         mpDPObject->SetDataCaption(maDefModel.maDataCaption);
+        // AlterOffice xlsx-round-trip: hand the captured behaviour-flag
+        // attributes off to ScDPObject so xepivotxml can re-emit them
+        // verbatim. mbHas… distinguishes "absent on source" from "set to
+        // false on source" (some attributes default to true in Excel, so
+        // the absent-vs-explicit-false distinction matters).
+        if (maDefModel.mbHasGridDropZones)
+            mpDPObject->SetOoxGridDropZones(maDefModel.mbGridDropZones);
+        if (maDefModel.mbHasFieldPrintTitles)
+            mpDPObject->SetOoxFieldPrintTitles(maDefModel.mbFieldPrintTitles);
+        if (maDefModel.mbHasMultipleFieldFilters)
+            mpDPObject->SetOoxMultipleFieldFilters(maDefModel.mbMultipleFieldFilters);
+        if (maDefModel.mbHasShowDataTips)
+            mpDPObject->SetOoxShowDataTips(maDefModel.mbShowDataTips);
+        if (maDefModel.mbHasApplyWidthHeightFormats)
+            mpDPObject->SetOoxApplyWidthHeightFormats(maDefModel.mbApplyProtection);
+        if (maDefModel.mbHasHideValuesRow)
+            mpDPObject->SetOoxHideValuesRow(maDefModel.mbHideValuesRow);
         mpDPObject->SetHideHeader(maLocationModel.mnFirstHeaderRow == 0);
         // OOXML <x:location firstDataRow="2"> = two-row header zone (button row + caption row).
         // BIFF importer does the equivalent at xipivot.cxx:1550. Without this, mnHeaderSize
