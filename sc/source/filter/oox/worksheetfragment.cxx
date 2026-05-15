@@ -19,6 +19,8 @@
 
 #include <worksheetfragment.hxx>
 #include <formulaparser.hxx>
+#include <workbooksettings.hxx>
+#include <scextopt.hxx>
 
 #include <osl/diagnose.h>
 #include <oox/core/filterbase.hxx>
@@ -375,6 +377,21 @@ ContextHandlerRef WorksheetFragment::onCreateContext( sal_Int32 nElement, const 
                 case XLS_TOKEN( scenarios ):                return new ScenariosContext( *this );
                 case XLS_TOKEN( extLst ):                   return new ExtLstGlobalContext( *this );
 
+                case XLS_TOKEN( sortState ):
+                {
+                    // Worksheet-level <sortState> passthrough (not the
+                    // autoFilter-nested variant the existing
+                    // SortStateContext handles). Capture ref + child
+                    // sortCondition refs into ScExtTabSettings so the
+                    // round-trip preserves Excel's "Redo last sort"
+                    // affordance.
+                    ScExtTabSettings& rTab = getWorkbookSettings()
+                        .getExtDocOptions().GetOrCreateTabSettings(getSheetIndex());
+                    rTab.maOoxSortStateRef = rAttribs.getString(XML_ref, OUString());
+                    rTab.maOoxSortConditionRefs.clear();
+                    return this;
+                }
+
                 case XLS_TOKEN( sheetViews ):
                 case XLS_TOKEN( cols ):
                 case XLS_TOKEN( mergeCells ):
@@ -408,6 +425,16 @@ ContextHandlerRef WorksheetFragment::onCreateContext( sal_Int32 nElement, const 
                 case XLS_TOKEN( tabColor ):         getWorksheetSettings().importTabColor( rAttribs );              break;
                 case XLS_TOKEN( outlinePr ):        getWorksheetSettings().importOutlinePr( rAttribs );             break;
                 case XLS_TOKEN( pageSetUpPr ):      importPageSetUpPr( rAttribs );                                  break;
+            }
+        break;
+
+        case XLS_TOKEN( sortState ):
+            if (nElement == XLS_TOKEN( sortCondition ))
+            {
+                ScExtTabSettings& rTab = getWorkbookSettings()
+                    .getExtDocOptions().GetOrCreateTabSettings(getSheetIndex());
+                rTab.maOoxSortConditionRefs.push_back(
+                    rAttribs.getString(XML_ref, OUString()));
             }
         break;
 
@@ -692,6 +719,22 @@ void WorksheetFragment::importCol( const AttributeList& rAttribs )
     aModel.mbCollapsed     = rAttribs.getBool( XML_collapsed, false );
     // set column properties in the current sheet
     setColumnModel( aModel );
+
+    // Capture the raw `width` attribute string so the round-trip preserves
+    // Excel's full decimal precision (LO's twips storage rounds to
+    // 2 decimals on emit). See ScExtTabSettings::maOoxColWidthStrings.
+    OUString sRawWidth = rAttribs.getString(XML_width, OUString());
+    if (!sRawWidth.isEmpty()
+        && aModel.maRange.mnFirst >= 1
+        && aModel.maRange.mnLast >= aModel.maRange.mnFirst)
+    {
+        ScExtTabSettings& rTab = getWorkbookSettings()
+            .getExtDocOptions().GetOrCreateTabSettings(getSheetIndex());
+        const SCCOL nFirst = static_cast<SCCOL>(aModel.maRange.mnFirst - 1);
+        const SCCOL nLast  = static_cast<SCCOL>(aModel.maRange.mnLast  - 1);
+        for (SCCOL c = nFirst; c <= nLast; ++c)
+            rTab.maOoxColWidthStrings[c] = sRawWidth;
+    }
 }
 
 void WorksheetFragment::importMergeCell( const AttributeList& rAttribs )

@@ -144,6 +144,17 @@ void WorkbookSettings::importWorkbookPr( const AttributeList& rAttribs )
     maBookSettings.mnDefaultThemeVer   = rAttribs.getInteger( XML_defaultThemeVersion, -1 );
     maBookSettings.mbSaveExtLinkValues = rAttribs.getBool( XML_saveExternalLinkValues, true );
     setDateMode( rAttribs.getBool( XML_date1904, false ), rAttribs.getBool( XML_dateCompatibility, true ) );
+
+    // Preserve passthrough state on the ExtDocOptions accumulator so the
+    // xlsx export side (excdoc.cxx FillAsHeaderXml) can re-emit the
+    // attributes verbatim. Only set when the source actually had the
+    // attribute, so the export side can distinguish "preserve" from
+    // "Excel default — don't emit".
+    ScExtDocSettings& rDocSett = maExtDocOptions.GetDocSettings();
+    if (maBookSettings.mnDefaultThemeVer != -1)
+        rDocSett.moDefaultThemeVersion = maBookSettings.mnDefaultThemeVer;
+    if (rAttribs.hasAttribute( XML_hidePivotFieldList ))
+        rDocSett.moHidePivotFieldList = rAttribs.getBool( XML_hidePivotFieldList, false );
 }
 
 void WorkbookSettings::importCalcPr( const AttributeList& rAttribs )

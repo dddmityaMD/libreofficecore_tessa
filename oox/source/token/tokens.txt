@@ -1074,6 +1074,7 @@ cadetBlue
 cakeSlice
 calcChain
 calcCompleted
+calcFeatures
 calcId
 calcMode
 calcOnExit
@@ -2261,6 +2262,7 @@ fans
 fast
 fax
 fc
+feature
 ferris
 ffData
 fgClr
@@ -5981,6 +5983,7 @@ x12ac
 x14
 x15
 x2
+xcalcf
 xAlign
 xIllusions
 xMode

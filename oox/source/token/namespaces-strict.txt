@@ -113,5 +113,8 @@ asvg                    http://schemas.microsoft.com/office/drawing/2016/SVG/mai
 # xls14Lst for features introduced by excel 2010
 xls14Lst               http://schemas.microsoft.com/office/spreadsheetml/2009/9/main
 
+# xcalcf — workbookPr extLst calcFeatures (Excel 2019+ feature gating)
+xcalcf                 http://schemas.microsoft.com/office/spreadsheetml/2018/calcfeatures
+
 # LibreOffice's own extensions
 loext                  http://schemas.libreoffice.org/

@@ -20,6 +20,8 @@
 #include <memory>
 #include <stylesbuffer.hxx>
 #include <patterncache.hxx>
+#include <workbooksettings.hxx>
+#include <scextopt.hxx>
 
 #include <com/sun/star/awt/FontDescriptor.hpp>
 #include <com/sun/star/awt/FontFamily.hpp>
@@ -612,6 +614,15 @@ void Font::importAttribs( sal_Int32 nElement, const AttributeList& rAttribs )
         break;
         case XLS_TOKEN( scheme ):
             maModel.mnScheme = rAttribs.getToken( XML_val, rDefModel.mnScheme );
+            // Shadow the (fontName -> scheme) binding so the export side
+            // can re-emit <scheme val="..."/> — Sc's internal font model
+            // drops mnScheme on conversion to ScDocument.
+            if (!maModel.maName.isEmpty()
+                && (maModel.mnScheme == XML_major || maModel.mnScheme == XML_minor))
+            {
+                getWorkbookSettings().getExtDocOptions().GetDocSettings()
+                    .maOoxFontSchemeByName[maModel.maName] = maModel.mnScheme;
+            }
         break;
         case XLS_TOKEN( family ):
             maModel.mnFamily = rAttribs.getInteger( XML_val, rDefModel.mnFamily );

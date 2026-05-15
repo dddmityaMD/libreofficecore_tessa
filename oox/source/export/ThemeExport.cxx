@@ -282,10 +282,12 @@ void ThemeExport::writeColorSystem(model::ComplexColor const& rComplexColor)
     if (iterator != constSystemColorTypeTokenMap.end())
     {
         const char* sValue = iterator->second;
+        // Pre-existing bug fix: end tag was XML_schemeClr (mismatch
+        // with the opening XML_sysClr) which would emit invalid XML
+        // when this path was taken.
         mpFS->startElementNS(XML_a, XML_sysClr, XML_val, sValue);
-        //XML_lastClr
         writeColorTransformations(rComplexColor.getTransformations());
-        mpFS->endElementNS(XML_a, XML_schemeClr);
+        mpFS->endElementNS(XML_a, XML_sysClr);
     }
 }
 
@@ -893,6 +895,29 @@ bool ThemeExport::writeColorSet(model::Theme const& rTheme)
             model::ThemeColorType eColorType = iterator->second;
             Color aColor = pColorSet->getColor(eColorType);
             mpFS->startElementNS(XML_a, nToken);
+
+            // sysClr round-trip: if the source theme bound this slot
+            // via <a:sysClr> (e.g. dk1 ⇄ windowText), re-emit sysClr
+            // with the resolved RGB carried as lastClr. Preserves
+            // dark-mode adaptability that would otherwise be lost.
+            // Only safe when alpha is opaque -- sysClr does not carry
+            // an alpha channel, so transparent slots fall through to
+            // the srgbClr+alpha path below.
+            model::SystemColorType eSysType
+                = pColorSet->getSystemColorType(eColorType);
+            if (eSysType != model::SystemColorType::Unused && !aColor.IsTransparent())
+            {
+                auto sysIt = constSystemColorTypeTokenMap.find(eSysType);
+                if (sysIt != constSystemColorTypeTokenMap.end())
+                {
+                    mpFS->singleElementNS(XML_a, XML_sysClr,
+                            XML_val,     sysIt->second,
+                            XML_lastClr, I32SHEX(sal_Int32(aColor.GetRGBColor())));
+                    mpFS->endElementNS(XML_a, nToken);
+                    continue;
+                }
+            }
+
             if (!aColor.IsTransparent())
                 mpFS->singleElementNS(XML_a, XML_srgbClr, XML_val,
                                       I32SHEX(sal_Int32(aColor.GetRGBColor())));

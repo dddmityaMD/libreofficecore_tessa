@@ -22,6 +22,8 @@
 
 #include <memory>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include <com/sun/star/uno/Reference.hxx>
 #include <oox/core/filterbase.hxx>
@@ -230,6 +232,26 @@ public:
         @param xProperties  The document properties to export.
      */
     void exportDocumentProperties( const css::uno::Reference< css::document::XDocumentProperties >& xProperties, bool bSecurityOptOpenReadOnly );
+
+    /** docProps/app.xml HeadingPairs / TitlesOfParts payload.
+
+        Excel emits the workbook's structural inventory here so third-party
+        tools (Tessa СЭД, EOS-Делопроизводство, SharePoint readers) can
+        enumerate sheets and named ranges without parsing workbook.xml.
+        LO previously emitted nothing for these elements; subclasses can
+        override `getAppExtendedTitles()` to supply per-app content.
+
+        The vector of pairs is the HeadingPairs payload — each pair is
+        (group label, count). E.g. for Calc: ("Worksheets", 2),
+        ("Named Ranges", 10). aTitles is the flat TitlesOfParts list and
+        its size MUST equal the sum of the counts in aHeadingPairs. */
+    struct AppExtendedTitles
+    {
+        std::vector<std::pair<OUString, sal_Int32>> aHeadingPairs;
+        std::vector<OUString>                       aTitles;
+        bool isEmpty() const { return aHeadingPairs.empty() && aTitles.empty(); }
+    };
+    virtual AppExtendedTitles getAppExtendedTitles() const;
 
     /** Write the customXml entries we are preserving (xlsx and pptx only). */
     void exportCustomFragments(const sax_fastparser::FSHelperPtr& pFS);

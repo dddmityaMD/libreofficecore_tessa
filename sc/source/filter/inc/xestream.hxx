@@ -327,6 +327,12 @@ public:
     virtual oox::drawingml::table::TableStyleListPtr getTableStyles() override;
     virtual oox::drawingml::chart::ChartConverter* getChartConverter() override;
 
+    /** docProps/app.xml HeadingPairs / TitlesOfParts content for xlsx:
+        the workbook's structural inventory of sheets and named ranges
+        that third-party readers (Tessa СЭД, EOS, SharePoint) expect. */
+    virtual oox::core::XmlFilterBase::AppExtendedTitles
+                                    getAppExtendedTitles() const override;
+
     static OUString GenerateUniqueTableName(const std::u16string_view& rOriginalName, const std::vector<OUString>& aNewTabNames, const std::vector<OUString>& aOriginalTabNames);
 
 private:

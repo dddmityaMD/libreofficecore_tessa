@@ -742,6 +742,12 @@ private:
     sal_uInt8           mnOutlineLevel;     /// Outline Level of column (for OOXML)
     sal_uInt16          mnFirstXclCol;      /// Index to first column.
     sal_uInt16          mnLastXclCol;       /// Index to last column.
+    /** Raw OOXML `width` attribute string captured at import (e.g.
+        "26.28515625"). When non-empty, SaveXml emits this verbatim
+        instead of LO's twips-rounded recomputation, preserving Excel's
+        decimal precision. Adjacent col records may only merge when
+        both have the same raw string. */
+    OUString            maRawWidthString;
 };
 
 /** Contains COLINFO records for all columns of a Calc sheet.

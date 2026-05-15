@@ -26,12 +26,33 @@ class DOCMODEL_DLLPUBLIC ColorSet
     OUString maName;
     std::array<Color, 12> maColors;
 
+    /** OOXML <a:sysClr> origin tracker. Indexed by ThemeColorType.
+        SystemColorType::Unused means "not from a sysClr"; any other
+        value means the source theme bound this slot to an OS system
+        colour (e.g. dk1 ⇄ windowText). Used to round-trip themes
+        whose `<a:dk1><a:sysClr/>` carries dark-mode adaptability —
+        without this, OOXML round-trip resolves the sysClr to a
+        literal `<a:srgbClr>` and the file no longer adapts to the
+        reader's OS theme. */
+    std::array<model::SystemColorType, 12> maSysColorTypes{};
+
 public:
     ColorSet(OUString const& rName);
 
     void setName(OUString const& rName) { maName = rName; }
 
     void add(model::ThemeColorType Type, Color aColorData);
+
+    /** Records that the given theme color slot was originally specified
+        via `<a:sysClr>` in the source. The resolved RGB value still
+        comes from `add()` / `getColor()`; this metadata is purely a
+        round-trip signal for ThemeExport. */
+    void setSystemColorType(model::ThemeColorType eThemeType,
+                            model::SystemColorType eSysType);
+
+    /** Returns the system color binding for the given slot, or
+        SystemColorType::Unused if none was recorded. */
+    model::SystemColorType getSystemColorType(model::ThemeColorType eThemeType) const;
 
     const OUString& getName() const { return maName; }
 

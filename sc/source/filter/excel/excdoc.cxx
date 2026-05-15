@@ -65,6 +65,62 @@
 
 using namespace oox;
 
+namespace {
+
+/** Emits a single XML attribute on the currently-open element.
+    Use between XclExpXmlStartSingleElementRecord and
+    XclExpXmlEndSingleElementRecord to push string-typed attributes
+    that the typed records (XclExpBoolRecord / XclExpValueRecord) do
+    not cover. Used for workbookPr@codeName preservation; written as a
+    local helper to keep the diff scoped to OOXML byte-preservation
+    without touching the shared xerecord typehierarchy. */
+class XclExpXmlStringAttrRecord : public XclExpRecordBase
+{
+public:
+    XclExpXmlStringAttrRecord( sal_Int32 nAttribute, OUString sValue )
+        : mnAttribute( nAttribute ), maValue(std::move( sValue )) {}
+
+    void SaveXml( XclExpXmlStream& rStrm ) override
+    {
+        rStrm.WriteAttributes( mnAttribute, maValue );
+    }
+
+private:
+    sal_Int32 mnAttribute;
+    OUString  maValue;
+};
+
+/** Emits a worksheet-level `<sortState>` block from ScExtTabSettings.
+    The customer-file form: `<sortState ref="A2:AF2">` with N
+    `<sortCondition ref="..."/>` children. Excel uses this for its
+    "Redo last sort" affordance — without preservation, the round-trip
+    silently loses the user's last-applied sort. */
+class XclExpWorksheetSortState : public XclExpRecordBase
+{
+public:
+    XclExpWorksheetSortState(OUString sRef, std::vector<OUString> aConditionRefs)
+        : maRef(std::move(sRef)), maConditionRefs(std::move(aConditionRefs)) {}
+
+    void SaveXml(XclExpXmlStream& rStrm) override
+    {
+        if (maRef.isEmpty())
+            return;
+        sax_fastparser::FSHelperPtr& r = rStrm.GetCurrentStream();
+        r->startElement(XML_sortState, XML_ref, maRef.toUtf8());
+        for (const OUString& rCondRef : maConditionRefs)
+        {
+            r->singleElement(XML_sortCondition, XML_ref, rCondRef.toUtf8());
+        }
+        r->endElement(XML_sortState);
+    }
+
+private:
+    OUString              maRef;
+    std::vector<OUString> maConditionRefs;
+};
+
+} // namespace
+
 static OUString lcl_GetVbaTabName( SCTAB n )
 {
     OUString aRet = "__VBA__"  + OUString::number( static_cast<sal_uInt16>(n) );
@@ -346,16 +402,40 @@ void ExcTable::FillAsHeaderXml( ExcBoundsheetList& rBoundsheetList )
     Add( new XclExpBoolRecord(0x008D, false, XML_showObjects ) );   // HIDEOBJ
 
     Add( new Exc1904( rDoc ) );
+
+    // Round-trip preservation of workbookPr@codeName / @defaultThemeVersion
+    // / @hidePivotFieldList. Source values captured at xlsx import in
+    // workbooksettings.cxx::importWorkbookPr (the codeName lands on the
+    // document via PROP_CodeName -> ScDocument::aDocCodeName; the other
+    // two go through ScExtDocSettings). Re-emit here when present so the
+    // round-tripped file keeps VBA codeName bindings, theme-version
+    // stamps, and the pivot-field-list panel suppression flag intact.
+    {
+        const OUString& rGlobCodeName = rDoc.GetCodeName();
+        if ( !rGlobCodeName.isEmpty() )
+            Add( new XclExpXmlStringAttrRecord( XML_codeName, rGlobCodeName ) );
+
+        const ScExtDocSettings& rDocSett = GetExtDocOptions().GetDocSettings();
+        if ( rDocSett.moDefaultThemeVersion )
+            Add( (new XclExpValueRecord<sal_Int32>(
+                      0, *rDocSett.moDefaultThemeVersion ))
+                 ->SetAttribute( XML_defaultThemeVersion ) );
+        if ( rDocSett.moHidePivotFieldList )
+            // Use "1"/"0" form (ToPsz10) rather than "true"/"false"
+            // (XclExpBoolRecord's default) so the round-trip matches the
+            // byte form Excel writes for OOXML xsd:boolean attributes.
+            Add( new XclExpXmlStringAttrRecord(
+                     XML_hidePivotFieldList,
+                     *rDocSett.moHidePivotFieldList ? u"1"_ustr : u"0"_ustr ) );
+    }
+
     // OOXTODO: The following /workbook/workbookPr attributes are mapped
     //          to various BIFF records that are not currently supported:
     //
     //          XML_allowRefreshQuery:          QSISTAG 802h: fEnableRefresh
     //          XML_autoCompressPictures:       COMPRESSPICTURES 89Bh: fAutoCompressPictures
     //          XML_checkCompatibility:         COMPAT12 88Ch: fNoCompatChk
-    //          XML_codeName:                   "Calc"
-    //          XML_defaultThemeVersion:        ???
     //          XML_filterPrivacy:              BOOKEXT 863h: fFilterPrivacy
-    //          XML_hidePivotFieldList:         BOOKBOOL DAh: fHidePivotTableFList
     //          XML_promptedSolutions:          BOOKEXT 863h: fBuggedUserAboutSolution
     //          XML_publishItems:               NAMEPUBLISH 893h: fPublished
     //          XML_saveExternalLinkValues:     BOOKBOOL DAh: fNoSavSupp
@@ -589,7 +669,9 @@ void ExcTable::FillAsTableXml()
 
     bool bSummaryBelow = GetRoot().GetDoc().GetTotalsRowBelow(mnScTab);
     Color aTabColor = GetRoot().GetDoc().GetTabBgColor(mnScTab);
-    Add(new XclExpXmlSheetPr(bFitToPages, mnScTab, aTabColor, bSummaryBelow, &GetFilterManager()));
+    OUString aCodeName;
+    GetRoot().GetDoc().GetCodeName(mnScTab, aCodeName);
+    Add(new XclExpXmlSheetPr(bFitToPages, mnScTab, aTabColor, bSummaryBelow, aCodeName, &GetFilterManager()));
 
     // GUTS (count & size of outline icons)
     aRecList.AppendRecord( mxCellTable->CreateRecord( EXC_ID_GUTS ) );
@@ -614,6 +696,17 @@ void ExcTable::FillAsTableXml()
         Add( new XclExpSheetProtection(true, mnScTab) );
 
     lcl_AddScenariosAndFilters( aRecList, GetRoot(), mnScTab );
+
+    // Worksheet-level sortState passthrough (captured on import in
+    // worksheetfragment.cxx). Emitted between autoFilter and
+    // mergedCells per OOXML element order. Preserves Excel's "Redo
+    // last sort" affordance across LO round-trip.
+    if (const ScExtTabSettings* pTab = GetExtDocOptions().GetTabSettings(mnScTab))
+    {
+        if (!pTab->maOoxSortStateRef.isEmpty())
+            Add(new XclExpWorksheetSortState(
+                pTab->maOoxSortStateRef, pTab->maOoxSortConditionRefs));
+    }
 
     // MERGEDCELLS record, generated by the cell table
     aRecList.AppendRecord( mxCellTable->CreateRecord( EXC_ID_MERGEDCELLS ) );
@@ -1345,14 +1438,21 @@ void ExcDocument::WriteXml( XclExpXmlStream& rStrm )
         rStrm.PopStream();
     }
 
-    // write if it has been read|imported or explicitly changed
-    // or if ref syntax isn't what would be native for our file format
-    // i.e. ExcelA1 in this case
-    if ( rCalcConfig.mbHasStringRefSyntax ||
-         (eConv != formula::FormulaGrammar::CONV_XL_A1) )
+    // workbook.xml/extLst — both the LO-side extCalcPr and any preserved
+    // Excel-side calcFeatures (xcalcf, Excel 2019+ feature-gating).
+    // The block is emitted when EITHER (a) we have an extCalcPr to write
+    // OR (b) source carried calcFeatures that we need to round-trip.
+    const std::vector<OUString>& rCalcFeatures
+        = GetExtDocOptions().GetDocSettings().maOoxCalcFeatures;
+    const bool bWantExtCalcPr = rCalcConfig.mbHasStringRefSyntax
+                                || (eConv != formula::FormulaGrammar::CONV_XL_A1);
+    if (bWantExtCalcPr || !rCalcFeatures.empty())
     {
         XclExtLstRef xExtLst = new XclExtLst( GetRoot()  );
-        xExtLst->AddRecord( new XclExpExtCalcPr( GetRoot(), eConv )  );
+        if (bWantExtCalcPr)
+            xExtLst->AddRecord( new XclExpExtCalcPr( GetRoot(), eConv ) );
+        if (!rCalcFeatures.empty())
+            xExtLst->AddRecord( new XclExpExtCalcFeatures( GetRoot(), rCalcFeatures ) );
         xExtLst->SaveXml(rStrm);
     }
 

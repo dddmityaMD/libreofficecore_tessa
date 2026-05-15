@@ -19,6 +19,8 @@
 
 #include <pivotcachebuffer.hxx>
 
+#include <workbooksettings.hxx>
+#include <scextopt.hxx>
 #include <com/sun/star/beans/XPropertySet.hpp>
 #include <com/sun/star/container/XIndexAccess.hpp>
 #include <com/sun/star/container/XNameAccess.hpp>
@@ -141,6 +143,13 @@ void PivotCacheItem::readString( const AttributeList& rAttribs )
 {
     maValue <<= rAttribs.getXString( XML_v, OUString() );
     mnType = XML_s;
+    // SharePoint "unresolved template" marker — see ScExtDocSettings::
+    // maOoxPivotCacheUnusedStrings. Excel's pivot cache spec defines u
+    // for any pivot-cache item type; readNumeric already captures it,
+    // but EOS/Tessa-generated reports put u="1" on string templates
+    // like "{*t_DocRegDate}" that downstream regeneration needs to
+    // re-resolve from the SharePoint query.
+    mbUnused = rAttribs.getBool( XML_u, false );
 }
 
 void PivotCacheItem::readNumeric( const AttributeList& rAttribs )
@@ -282,6 +291,23 @@ void PivotCacheItemList::importItem( sal_Int32 nElement, const AttributeList& rA
         case XLS_TOKEN( b ):    rItem.readBool( rAttribs );                         break;
         case XLS_TOKEN( e ):    rItem.readError( rAttribs );                        break;
         default:    OSL_FAIL( "PivotCacheItemList::importItem - unknown element type" );
+    }
+
+    // Capture u="1" strings into ScExtDocSettings for round-trip — Excel
+    // pivot cache emits this marker on entries that downstream tooling
+    // (SharePoint / EOS / Tessa report regen) needs to re-resolve from
+    // the original query. ScDPCache discards the marker, so we keep it
+    // alongside the doc as opaque metadata. Use the in-progress
+    // WorkbookSettings accumulator — the doc's ScExtDocOptions only
+    // exists after WorkbookSettings::~WorkbookSettings copies it over.
+    if (rItem.isUnused() && rItem.getType() == XML_s)
+    {
+        OUString aValue;
+        if (rItem.getValue() >>= aValue)
+        {
+            getWorkbookSettings().getExtDocOptions().GetDocSettings()
+                .maOoxPivotCacheUnusedStrings.insert(aValue);
+        }
     }
 }
 

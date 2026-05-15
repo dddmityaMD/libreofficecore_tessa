@@ -23,6 +23,7 @@
 #include <oox/core/contexthandler2.hxx>
 #include <oox/drawingml/clrscheme.hxx>
 #include <oox/drawingml/color.hxx>
+#include <docmodel/color/ComplexColor.hxx>
 #include <drawingml/colorchoicecontext.hxx>
 
 namespace oox::drawingml {
@@ -44,6 +45,11 @@ private:
     ClrScheme&      mrClrScheme;
     model::ColorSet& mrColorSet;
     sal_Int32       mnColorToken;
+    /// Captures sysClr metadata when source theme used `<a:sysClr>`.
+    /// Inspected in the destructor and pushed onto mrColorSet so the
+    /// theme writer can re-emit `<a:sysClr>` instead of resolving to
+    /// `<a:srgbClr>` (which would destroy dark-mode adaptability).
+    model::ComplexColor maComplexColor;
 };
 
 class clrSchemeContext final : public oox::core::ContextHandler2

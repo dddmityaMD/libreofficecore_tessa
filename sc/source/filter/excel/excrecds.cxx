@@ -360,12 +360,17 @@ XclExpWsbool::XclExpWsbool( bool bFitToPages )
         SetValue( GetValue() | EXC_WSBOOL_FITTOPAGE );
 }
 
-XclExpXmlSheetPr::XclExpXmlSheetPr( bool bFitToPages, SCTAB nScTab, const Color& rTabColor, bool bSummaryBelow, XclExpFilterManager* pManager ) :
-    mnScTab(nScTab), mpManager(pManager), mbFitToPage(bFitToPages), maTabColor(rTabColor), mbSummaryBelow(bSummaryBelow) {}
+XclExpXmlSheetPr::XclExpXmlSheetPr( bool bFitToPages, SCTAB nScTab, const Color& rTabColor, bool bSummaryBelow,
+                                    OUString sCodeName, XclExpFilterManager* pManager ) :
+    mnScTab(nScTab), mpManager(pManager), mbFitToPage(bFitToPages), maTabColor(rTabColor),
+    mbSummaryBelow(bSummaryBelow), maCodeName(std::move(sCodeName)) {}
 
 void XclExpXmlSheetPr::SaveXml( XclExpXmlStream& rStrm )
 {
     sax_fastparser::FSHelperPtr& rWorksheet = rStrm.GetCurrentStream();
+    // sheetPr@codeName preserved across xlsx round-trip when the source
+    // had it. toUtf8() so non-ASCII codenames (e.g. Cyrillic "Лист2"
+    // from EOS/Tessa-generated reports) survive serialization.
     rWorksheet->startElement( XML_sheetPr,
             // OOXTODO: XML_syncHorizontal,
             // OOXTODO: XML_syncVertical,
@@ -373,7 +378,7 @@ void XclExpXmlSheetPr::SaveXml( XclExpXmlStream& rStrm )
             // OOXTODO: XML_transitionEvaluation,
             // OOXTODO: XML_transitionEntry,
             // OOXTODO: XML_published,
-            // OOXTODO: XML_codeName,
+            XML_codeName, sax_fastparser::UseIf(maCodeName.toUtf8(), !maCodeName.isEmpty()),
             XML_filterMode, mpManager ? ToPsz(mpManager->HasFilterMode(mnScTab)) : nullptr
             // OOXTODO: XML_enableFormatConditionsCalculation
     );

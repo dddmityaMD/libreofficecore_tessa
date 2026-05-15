@@ -298,6 +298,14 @@ struct XclFontData
 
     model::ComplexColor maComplexColor; /// Font color.
 
+    /** OOXML `<scheme val="..."/>` binding. Token id ("major", "minor",
+        or XML_none / XML_TOKEN_INVALID for unset). When a font carries
+        this binding, Excel resolves the typeface from the theme's
+        major/minor font slot, so a workbook-theme change later restyles
+        all bound cells. LO previously dropped the binding on export,
+        hard-coding the font name and breaking theme-follow behavior. */
+    sal_Int32           mnScheme = -1;  // -1 means \"no scheme element\"
+
     /** Constructs an empty font data structure. */
     explicit XclFontData();
     /** Constructs a font data structure and fills it with the passed font attributes (except color). */

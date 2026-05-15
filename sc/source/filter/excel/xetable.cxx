@@ -29,6 +29,7 @@
 #include <tools/UnitConversion.hxx>
 #include <editeng/flditem.hxx>
 #include <document.hxx>
+#include <scextopt.hxx>
 #include <dociter.hxx>
 #include <olinetab.hxx>
 #include <formulacell.hxx>
@@ -1690,6 +1691,20 @@ XclExpColinfo::XclExpColinfo( const XclExpRoot& rRoot,
     mnWidth = XclTools::GetXclColumnWidth( nScWidth, GetCharWidth() );
     mnScWidth = convertTwipToMm100(nScWidth);
 
+    // Recover raw `width` string captured at OOXML import — preserves
+    // 5-decimal precision Excel emits (e.g. 26.28515625). Falls back to
+    // the recomputed two-decimal value when the source didn't carry a
+    // captured string for this column.
+    if (const ScExtDocOptions* pExt = rDoc.GetExtDocOptions())
+    {
+        if (const ScExtTabSettings* pTab = pExt->GetTabSettings(nScTab))
+        {
+            auto it = pTab->maOoxColWidthStrings.find(nScCol);
+            if (it != pTab->maOoxColWidthStrings.end())
+                maRawWidthString = it->second;
+        }
+    }
+
     // column flags
     ::set_flag( mnFlags, EXC_COLINFO_HIDDEN, rDoc.ColHidden(nScCol, nScTab) );
 
@@ -1716,11 +1731,15 @@ bool XclExpColinfo::IsDefault( const XclExpDefcolwidth& rDefColWidth )
 
 bool XclExpColinfo::TryMerge( const XclExpColinfo& rColInfo )
 {
+    // Adjacent col records merge only when their raw-width strings also
+    // match — otherwise the round-trip would lose distinct
+    // captured-precision values for the same Excel-width.
     if( (maXFId.mnXFIndex == rColInfo.maXFId.mnXFIndex) &&
         (mnWidth == rColInfo.mnWidth) &&
         (mnFlags == rColInfo.mnFlags) &&
         (mnOutlineLevel == rColInfo.mnOutlineLevel) &&
-        (mnLastXclCol + 1 == rColInfo.mnFirstXclCol) )
+        (mnLastXclCol + 1 == rColInfo.mnFirstXclCol) &&
+        (maRawWidthString == rColInfo.maRawWidthString) )
     {
         mnLastXclCol = rColInfo.mnLastXclCol;
         return true;
@@ -1756,6 +1775,11 @@ void XclExpColinfo::SaveXml( XclExpXmlStream& rStrm )
     // 0.5 number (0.005 to output value) - used to increase value before truncating,
     //            to avoid situation when 2.997 will be truncated to 2.99 and not to 3.00
     const double nTruncatedExcelColumnWidth = std::trunc( nExcelColumnWidth * 100.0 + 0.5 ) / 100.0;
+    // Use the captured source-side string verbatim when available;
+    // otherwise emit the LO-computed two-decimal value.
+    const OString sWidth = maRawWidthString.isEmpty()
+        ? OString::number(nTruncatedExcelColumnWidth)
+        : maRawWidthString.toUtf8();
     rStrm.GetCurrentStream()->singleElement( XML_col,
             // OOXTODO: XML_bestFit,
             XML_collapsed,      ToPsz( ::get_flag( mnFlags, EXC_COLINFO_COLLAPSED ) ),
@@ -1766,7 +1790,7 @@ void XclExpColinfo::SaveXml( XclExpXmlStream& rStrm )
             XML_min,            OString::number(mnFirstXclCol + 1),
             // OOXTODO: XML_phonetic,
             XML_style,          lcl_GetStyleId(rStrm, maXFId.mnXFIndex),
-            XML_width,          OString::number(nTruncatedExcelColumnWidth) );
+            XML_width,          sWidth );
 }
 
 XclExpColinfoBuffer::XclExpColinfoBuffer( const XclExpRoot& rRoot ) :

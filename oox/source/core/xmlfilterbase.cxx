@@ -140,6 +140,8 @@ const Sequence< beans::Pair< OUString, sal_Int32 > >& NamespaceIds()
              NMSP_dsp},
             {u"http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"_ustr,
              NMSP_xls14Lst},
+            {u"http://schemas.microsoft.com/office/spreadsheetml/2018/calcfeatures"_ustr,
+             NMSP_xcalcf},
             {u"http://schemas.libreoffice.org/"_ustr, NMSP_loext},
             {u"http://schemas.microsoft.com/office/drawing/2010/main"_ustr,
              NMSP_a14},
@@ -232,6 +234,14 @@ std::shared_ptr<::oox::drawingml::Theme> XmlFilterBase::getCurrentThemePtr() con
 {
     // default returns empty ptr
     return std::shared_ptr<::oox::drawingml::Theme>();
+}
+
+XmlFilterBase::AppExtendedTitles XmlFilterBase::getAppExtendedTitles() const
+{
+    // Default: no HeadingPairs/TitlesOfParts content. Filters that know
+    // their document type (Calc: sheets + named ranges; Impress: slide
+    // titles; etc.) override this to produce inventory content.
+    return {};
 }
 
 void XmlFilterBase::checkDocumentProperties(const Reference<XDocumentProperties>& xDocProps)
@@ -811,12 +821,62 @@ writeAppProperties( XmlFilterBase& rSelf, const Reference< XDocumentProperties >
     // EditingDuration is in seconds, TotalTime is in minutes.
     if (!bRemovePersonalInfo && !SvtSecurityOptions::IsOptionSet(SvtSecurityOptions::EOption::DocWarnRemoveEditingTimeInfo))
         writeElement(pAppProps, XML_TotalTime, xProperties->getEditingDuration() / 60);
+
+    // HeadingPairs / TitlesOfParts — workbook inventory used by Excel
+    // and third-party readers (Tessa СЭД, SharePoint) to enumerate
+    // sheets and named ranges without parsing workbook.xml. Subclasses
+    // provide content via getAppExtendedTitles(); default returns empty
+    // and nothing is emitted.
+    {
+        XmlFilterBase::AppExtendedTitles aExt = rSelf.getAppExtendedTitles();
+        if ( !aExt.isEmpty() )
+        {
+            sal_Int32 nHeadingPairsSize = 0;
+            sal_Int32 nTitleSumFromPairs = 0;
+            for (const auto& p : aExt.aHeadingPairs)
+            {
+                nHeadingPairsSize += 2; // each pair contributes (lpstr label, i4 count)
+                nTitleSumFromPairs += p.second;
+            }
+            // Sanity-check the contract: title count must equal the
+            // summed counts from the pairs. If they disagree, the
+            // override produced an internally-inconsistent payload —
+            // skip emit rather than write a malformed app.xml.
+            if (nTitleSumFromPairs == static_cast<sal_Int32>(aExt.aTitles.size()))
+            {
+                pAppProps->startElement(XML_HeadingPairs);
+                pAppProps->startElement( FSNS(XML_vt, XML_vector),
+                        XML_size,     OUString::number(nHeadingPairsSize),
+                        XML_baseType, "variant");
+                for (const auto& p : aExt.aHeadingPairs)
+                {
+                    pAppProps->startElement(FSNS(XML_vt, XML_variant));
+                    writeElement(pAppProps, FSNS(XML_vt, XML_lpstr), p.first);
+                    pAppProps->endElement(FSNS(XML_vt, XML_variant));
+
+                    pAppProps->startElement(FSNS(XML_vt, XML_variant));
+                    writeElement(pAppProps, FSNS(XML_vt, XML_i4), p.second);
+                    pAppProps->endElement(FSNS(XML_vt, XML_variant));
+                }
+                pAppProps->endElement(FSNS(XML_vt, XML_vector));
+                pAppProps->endElement(XML_HeadingPairs);
+
+                pAppProps->startElement(XML_TitlesOfParts);
+                pAppProps->startElement( FSNS(XML_vt, XML_vector),
+                        XML_size,     OUString::number(static_cast<sal_Int32>(aExt.aTitles.size())),
+                        XML_baseType, "lpstr");
+                for (const auto& sTitle : aExt.aTitles)
+                    writeElement(pAppProps, FSNS(XML_vt, XML_lpstr), sTitle);
+                pAppProps->endElement(FSNS(XML_vt, XML_vector));
+                pAppProps->endElement(XML_TitlesOfParts);
+            }
+        }
+    }
+
 #ifdef OOXTODO
     writeElement( pAppProps, XML_HiddenSlides,          "hidden slides" );
     writeElement( pAppProps, XML_MMClips,               "mm clips" );
     writeElement( pAppProps, XML_ScaleCrop,             "scale crop" );
-    writeElement( pAppProps, XML_HeadingPairs,          "heading pairs" );
-    writeElement( pAppProps, XML_TitlesOfParts,         "titles of parts" );
     writeElement( pAppProps, XML_LinksUpToDate,         "links up-to-date" );
     writeElement( pAppProps, XML_SharedDoc,             "shared doc" );
     writeElement( pAppProps, XML_HLinks,                "hlinks" );

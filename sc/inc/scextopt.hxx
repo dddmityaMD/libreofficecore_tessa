@@ -18,7 +18,9 @@
  */
 #pragma once
 
+#include <map>
 #include <memory>
+#include <set>
 #include <vector>
 #include <tools/gen.hxx>
 #include <tools/color.hxx>
@@ -35,6 +37,42 @@ struct ScExtDocSettings
      *  4 is 2007, 5 is 2010, 6 is 2013 and 2016, 7 is 2019-2024+
      */
     std::optional<sal_Int16> moLowestEdited;
+
+    /** OOXML workbookPr@defaultThemeVersion. Excel-emitted theme stamp
+        used by theme-update detection. Captured on xlsx import and
+        re-emitted on xlsx export so the workbook round-trips with the
+        same theme version identifier. */
+    std::optional<sal_Int32> moDefaultThemeVersion;
+
+    /** OOXML workbookPr@hidePivotFieldList. When true, Excel hides the
+        right-side pivot field list panel by default when a pivot is
+        selected. Captured on xlsx import and re-emitted on xlsx export. */
+    std::optional<bool> moHidePivotFieldList;
+
+    /** OOXML workbook.xml `<extLst><ext uri="{B58B0392-...}">` calc-feature
+        flag list (Excel 2019+ `xcalcf:feature name="microsoft.com:XXX"`
+        entries — RD, Single, FV, CNMTM, LET_WF, LAMBDA_WF, ARRAYTEXT_WF
+        etc.). Captured on xlsx import and re-emitted on xlsx export so
+        downstream Excel readers continue to see the same feature-gating
+        markers. Empty when source had no such extension. */
+    std::vector<OUString> maOoxCalcFeatures;
+
+    /** OOXML pivotCache/pivotCacheDefinition*.xml `<s u="1">` SharePoint
+        "unresolved template" string markers — captured on import,
+        re-emitted on save so SharePoint-aware tooling (EOS, Tessa SED
+        report regen) continues to see which cache strings are
+        placeholders that need re-resolution. The set holds the literal
+        string value (e.g. `{*t_DocRegDate}`); on save, any cache string
+        whose value is in the set gets `u="1"` re-emitted. */
+    std::set<OUString> maOoxPivotCacheUnusedStrings;
+
+    /** OOXML `<font><scheme val="..."/></font>` theme-binding lookup,
+        keyed by font name. When a font is bound to the theme major/
+        minor font slot, the binding is preserved so a later theme
+        change restyles the cells. Sc's internal font model doesn't
+        track this attribute, so we shadow it by name. Mapping value
+        is the XML token id (XML_major / XML_minor). */
+    std::map<OUString, sal_Int32> maOoxFontSchemeByName;
 
     explicit            ScExtDocSettings();
 };
@@ -74,6 +112,22 @@ struct ScExtTabSettings
         survives a round-trip through LO. Empty when source had no
         printerSettings relation on the worksheet. */
     std::vector<sal_uInt8> maOoxPrinterSettingsBin;
+
+    /** OOXML worksheet-level `<sortState>` passthrough. Captures the
+        `ref` attribute on `<sortState>` and the `ref` of each child
+        `<sortCondition>` so Excel's "Redo last sort" affordance still
+        has the prior sort to redo after a LO round-trip. Empty
+        `maOoxSortStateRef` means the source had no worksheet-level
+        sortState. */
+    OUString               maOoxSortStateRef;
+    std::vector<OUString>  maOoxSortConditionRefs;
+
+    /** OOXML `<col width="..."/>` raw-string preservation, keyed by 0-based
+        SCCOL. LO stores column widths in twips (sal_uInt16) which loses
+        the decimal precision Excel emits (e.g. 26.28515625). Round-trip
+        replays the source string verbatim when present, falls back to
+        LO's computed value for cols not in the map. */
+    std::map<SCCOL, OUString> maOoxColWidthStrings;
 
     explicit            ScExtTabSettings();
 };

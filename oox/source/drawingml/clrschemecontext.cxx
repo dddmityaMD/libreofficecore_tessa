@@ -56,7 +56,7 @@ clrMapContext::clrMapContext( ContextHandler2Helper const & rParent,
 }
 
 clrSchemeColorContext::clrSchemeColorContext(ContextHandler2Helper const & rParent, ClrScheme& rClrScheme, model::ColorSet& rColorSet, sal_Int32 nColorToken)
-    : ColorContext(rParent, this, nullptr)
+    : ColorContext(rParent, this, &maComplexColor)
     , mrClrScheme(rClrScheme)
     , mrColorSet(rColorSet)
     , mnColorToken(nColorToken)
@@ -67,26 +67,45 @@ clrSchemeColorContext::~clrSchemeColorContext()
 {
     ::Color aColor = getColor(getFilter().getGraphicHelper());
     mrClrScheme.setColor(mnColorToken, aColor);
+
+    // Map the OOXML token (<a:dk1> etc.) to the docmodel ThemeColorType
+    // slot in the ColorSet, so the RGB value can later be retrieved by
+    // ThemeExport on save.
+    model::ThemeColorType eThemeType = model::ThemeColorType::Unknown;
     switch (mnColorToken)
     {
         case XML_tx1:
-        case XML_dk1: mrColorSet.add(model::ThemeColorType::Dark1, aColor); break;
+        case XML_dk1:      eThemeType = model::ThemeColorType::Dark1;             break;
         case XML_bg1:
-        case XML_lt1: mrColorSet.add(model::ThemeColorType::Light1, aColor); break;
+        case XML_lt1:      eThemeType = model::ThemeColorType::Light1;            break;
         case XML_tx2:
-        case XML_dk2: mrColorSet.add(model::ThemeColorType::Dark2, aColor); break;
+        case XML_dk2:      eThemeType = model::ThemeColorType::Dark2;             break;
         case XML_bg2:
-        case XML_lt2: mrColorSet.add(model::ThemeColorType::Light2, aColor); break;
-        case XML_accent1: mrColorSet.add(model::ThemeColorType::Accent1, aColor); break;
-        case XML_accent2: mrColorSet.add(model::ThemeColorType::Accent2, aColor); break;
-        case XML_accent3: mrColorSet.add(model::ThemeColorType::Accent3, aColor); break;
-        case XML_accent4: mrColorSet.add(model::ThemeColorType::Accent4, aColor); break;
-        case XML_accent5: mrColorSet.add(model::ThemeColorType::Accent5, aColor); break;
-        case XML_accent6: mrColorSet.add(model::ThemeColorType::Accent6, aColor); break;
-        case XML_hlink: mrColorSet.add(model::ThemeColorType::Hyperlink, aColor); break;
-        case XML_folHlink: mrColorSet.add(model::ThemeColorType::FollowedHyperlink, aColor); break;
+        case XML_lt2:      eThemeType = model::ThemeColorType::Light2;            break;
+        case XML_accent1:  eThemeType = model::ThemeColorType::Accent1;           break;
+        case XML_accent2:  eThemeType = model::ThemeColorType::Accent2;           break;
+        case XML_accent3:  eThemeType = model::ThemeColorType::Accent3;           break;
+        case XML_accent4:  eThemeType = model::ThemeColorType::Accent4;           break;
+        case XML_accent5:  eThemeType = model::ThemeColorType::Accent5;           break;
+        case XML_accent6:  eThemeType = model::ThemeColorType::Accent6;           break;
+        case XML_hlink:    eThemeType = model::ThemeColorType::Hyperlink;         break;
+        case XML_folHlink: eThemeType = model::ThemeColorType::FollowedHyperlink; break;
         default: break;
     }
+    if (eThemeType == model::ThemeColorType::Unknown)
+        return;
+
+    mrColorSet.add(eThemeType, aColor);
+
+    // If the source theme bound this slot via <a:sysClr> (e.g. dk1 ⇄
+    // windowText), preserve the binding alongside the resolved RGB.
+    // ThemeExport reads it back to emit <a:sysClr> instead of
+    // <a:srgbClr>, which keeps dark-mode adaptability across the
+    // round-trip. Without this, Excel running in dark mode would show
+    // hard-coded #000000 where the source asked for the OS dark text
+    // colour.
+    if (maComplexColor.getType() == model::ColorType::System)
+        mrColorSet.setSystemColorType(eThemeType, maComplexColor.getSystemColorType());
 }
 
 clrSchemeContext::clrSchemeContext(ContextHandler2Helper const & rParent, ClrScheme& rClrScheme, model::ColorSet& rColorSet)

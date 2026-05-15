@@ -302,7 +302,8 @@ class XclExpXmlSheetPr final : public XclExpRecordBase
 {
 public:
     explicit XclExpXmlSheetPr(
-        bool bFitToPages, SCTAB nScTab, const Color& rTabColor, bool bSummaryBelow, XclExpFilterManager* pManager );
+        bool bFitToPages, SCTAB nScTab, const Color& rTabColor, bool bSummaryBelow,
+        OUString sCodeName, XclExpFilterManager* pManager );
 
     virtual void SaveXml( XclExpXmlStream& rStrm ) override;
 
@@ -312,6 +313,7 @@ private:
     bool mbFitToPage;
     Color maTabColor;
     bool mbSummaryBelow;
+    OUString maCodeName;  ///< VBA codeName, preserved verbatim across xlsx round-trip.
 };
 
 class XclExpFiltermode final : public XclExpEmptyRecord

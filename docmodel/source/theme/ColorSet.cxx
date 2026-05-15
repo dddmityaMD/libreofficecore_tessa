@@ -27,6 +27,21 @@ void ColorSet::add(model::ThemeColorType eType, Color aColorData)
     maColors[sal_Int16(eType)] = aColorData;
 }
 
+void ColorSet::setSystemColorType(model::ThemeColorType eThemeType,
+                                  model::SystemColorType eSysType)
+{
+    if (eThemeType == model::ThemeColorType::Unknown)
+        return;
+    maSysColorTypes[size_t(eThemeType)] = eSysType;
+}
+
+model::SystemColorType ColorSet::getSystemColorType(model::ThemeColorType eThemeType) const
+{
+    if (eThemeType == model::ThemeColorType::Unknown)
+        return model::SystemColorType::Unused;
+    return maSysColorTypes[size_t(eThemeType)];
+}
+
 Color ColorSet::getColor(model::ThemeColorType eType) const
 {
     if (eType == model::ThemeColorType::Unknown)

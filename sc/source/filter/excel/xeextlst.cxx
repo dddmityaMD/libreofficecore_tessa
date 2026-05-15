@@ -595,6 +595,35 @@ void XclExpExtCalcPr::SaveXml( XclExpXmlStream& rStrm )
     rWorksheet->endElement( XML_ext );
 }
 
+XclExpExtCalcFeatures::XclExpExtCalcFeatures( const XclExpRoot& rRoot,
+                                              std::vector<OUString> aFeatures ):
+    XclExpExt( rRoot ),
+    maFeatures(std::move(aFeatures))
+{
+    // The fixed URI assigned by Excel to the calcFeatures ext block;
+    // every implementation that emits this block uses the same one,
+    // and readers key off it to find the calcFeatures payload.
+    maURI = "{B58B0392-4F1F-4190-BB64-5DF3571DCE5F}"_ostr;
+}
+
+void XclExpExtCalcFeatures::SaveXml( XclExpXmlStream& rStrm )
+{
+    if (maFeatures.empty())
+        return;
+    sax_fastparser::FSHelperPtr& rWorkbook = rStrm.GetCurrentStream();
+    rWorkbook->startElement( XML_ext,
+            FSNS(XML_xmlns, XML_xcalcf), rStrm.getNamespaceURL(OOX_NS(xcalcf)),
+            XML_uri, maURI );
+    rWorkbook->startElementNS(XML_xcalcf, XML_calcFeatures);
+    for (const OUString& rName : maFeatures)
+    {
+        rWorkbook->singleElementNS(XML_xcalcf, XML_feature,
+                XML_name, rName.toUtf8());
+    }
+    rWorkbook->endElementNS(XML_xcalcf, XML_calcFeatures);
+    rWorkbook->endElement( XML_ext );
+}
+
 XclExpExtCondFormat::XclExpExtCondFormat( const XclExpRoot& rRoot ):
     XclExpExt( rRoot )
 {

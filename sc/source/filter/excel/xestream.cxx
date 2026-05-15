@@ -56,6 +56,9 @@
 #include <sfx2/app.hxx>
 
 #include <docsh.hxx>
+#include <document.hxx>
+#include <rangenam.hxx>
+#include <algorithm>
 #include <tabvwsh.hxx>
 #include <viewdata.hxx>
 #include <excdoc.hxx>
@@ -1022,6 +1025,122 @@ oox::drawingml::chart::ChartConverter* XclExpXmlStream::getChartConverter()
 {
     // DO NOT CALL
     return nullptr;
+}
+
+namespace {
+
+/** Quote a sheet name for OOXML title-of-parts display.
+    Excel always single-quotes sheet names in this context (matches what
+    a cell reference like `'Sheet1'!A1` uses). The customer-file form
+    is `'Сводная таблица'!Print_Titles`. Quotes inside a name are
+    doubled per OOXML quoting rules. */
+OUString lcl_QuoteSheetName(const OUString& rName)
+{
+    return "'" + rName.replaceAll(u"'", u"''") + "'";
+}
+
+/** Display name for a built-in name used by app.xml/TitlesOfParts.
+    Matches what Excel writes: `_xlnm.Print_Area` → `Print_Area`,
+    `_xlnm.Print_Titles` → `Print_Titles`. Returns empty string for
+    private built-ins like `_xlnm._FilterDatabase` (leading underscore
+    after `_xlnm.`) which Excel omits from app.xml.
+
+    Two prefixes are recognised because LO stores built-in names
+    differently depending on the import path: OOXML imports preserve
+    `_xlnm.` (sc/source/filter/oox/defnamesbuffer.cxx); legacy BIFF
+    imports use `Excel_BuiltIn_` (sc/source/filter/excel/xltools.cxx).
+    Files that bounced through BIFF and back can carry either form. */
+OUString lcl_AppXmlBuiltInDisplayName(const OUString& rRawName)
+{
+    constexpr std::u16string_view kPrefixOox  = u"_xlnm.";
+    constexpr std::u16string_view kPrefixBiff = u"Excel_BuiltIn_";
+    OUString sRest;
+    if (rRawName.startsWith(kPrefixOox))
+        sRest = rRawName.copy(kPrefixOox.size());
+    else if (rRawName.startsWith(kPrefixBiff))
+        sRest = rRawName.copy(kPrefixBiff.size());
+    else
+        return rRawName;
+    if (sRest.isEmpty() || sRest[0] == '_')
+        return OUString();  // private internal, skip (e.g. _FilterDatabase)
+    return sRest;
+}
+
+} // namespace
+
+oox::core::XmlFilterBase::AppExtendedTitles XclExpXmlStream::getAppExtendedTitles() const
+{
+    oox::core::XmlFilterBase::AppExtendedTitles aResult;
+
+    ScDocShell* pShell = const_cast<XclExpXmlStream*>(this)->getDocShell();
+    if (!pShell)
+        return aResult;
+    ScDocument& rDoc = pShell->GetDocument();
+
+    // Worksheets group: every sheet (including hidden), in tab order.
+    std::vector<OUString> aSheetTitles;
+    const SCTAB nTabCount = rDoc.GetTableCount();
+    for (SCTAB nTab = 0; nTab < nTabCount; ++nTab)
+    {
+        OUString aSheetName;
+        rDoc.GetName(nTab, aSheetName);
+        if (!aSheetName.isEmpty())
+            aSheetTitles.push_back(aSheetName);
+    }
+
+    // Named ranges group: workbook-scope + sheet-scope (including
+    // built-in Print_Area / Print_Titles). Sorted alphabetically by
+    // display name, matching how Excel orders them in app.xml. Excel
+    // also excludes private xlnm names (e.g. _xlnm._FilterDatabase),
+    // which lcl_AppXmlBuiltInDisplayName flags as empty.
+    std::vector<OUString> aNameTitles;
+    if (const ScRangeName* pGlobal = rDoc.GetRangeName())
+    {
+        for (const auto& [_, rData] : *pGlobal)
+        {
+            OUString sDisp = lcl_AppXmlBuiltInDisplayName(rData->GetName());
+            if (!sDisp.isEmpty())
+                aNameTitles.push_back(sDisp);
+        }
+    }
+    for (SCTAB nTab = 0; nTab < nTabCount; ++nTab)
+    {
+        const ScRangeName* pLocal = rDoc.GetRangeName(nTab);
+        if (!pLocal)
+            continue;
+        OUString aSheetName;
+        rDoc.GetName(nTab, aSheetName);
+        if (aSheetName.isEmpty())
+            continue;
+        for (const auto& [_, rData] : *pLocal)
+        {
+            OUString sDisp = lcl_AppXmlBuiltInDisplayName(rData->GetName());
+            if (sDisp.isEmpty())
+                continue;
+            aNameTitles.push_back(lcl_QuoteSheetName(aSheetName) + "!" + sDisp);
+        }
+    }
+    std::sort(aNameTitles.begin(), aNameTitles.end());
+
+    // Build the result: HeadingPairs entries only when their group has
+    // members. TitlesOfParts is sheet titles followed by name titles,
+    // matching the HeadingPairs order.
+    if (!aSheetTitles.empty())
+    {
+        aResult.aHeadingPairs.emplace_back(u"Worksheets"_ustr,
+                                            static_cast<sal_Int32>(aSheetTitles.size()));
+        aResult.aTitles.insert(aResult.aTitles.end(),
+                                aSheetTitles.begin(), aSheetTitles.end());
+    }
+    if (!aNameTitles.empty())
+    {
+        aResult.aHeadingPairs.emplace_back(u"Named Ranges"_ustr,
+                                            static_cast<sal_Int32>(aNameTitles.size()));
+        aResult.aTitles.insert(aResult.aTitles.end(),
+                                aNameTitles.begin(), aNameTitles.end());
+    }
+
+    return aResult;
 }
 
 ScDocShell* XclExpXmlStream::getDocShell()

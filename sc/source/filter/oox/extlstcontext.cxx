@@ -20,6 +20,8 @@
 #include <document.hxx>
 #include <worksheetfragment.hxx>
 #include <workbookfragment.hxx>
+#include <workbooksettings.hxx>
+#include <scextopt.hxx>
 #include <stylesbuffer.hxx>
 #include <stylesfragment.hxx>
 #include <SparklineFragment.hxx>
@@ -455,6 +457,24 @@ ContextHandlerRef ExtGlobalWorkbookContext::onCreateContext( sal_Int32 nElement,
                break;
         }
         rDoc.SetCalcConfig(aCalcConfig);
+    }
+    else if (nElement == XCALCF_TOKEN(calcFeatures))
+    {
+        // <xcalcf:calcFeatures> is the Excel 2019+ feature-gating block
+        // inside workbook.xml/extLst. Stay on this context so child
+        // <xcalcf:feature name="..."/> elements get dispatched below.
+        return this;
+    }
+    else if (nElement == XCALCF_TOKEN(feature))
+    {
+        // Captured into ScExtDocSettings for re-emit on save. The
+        // name attribute is "microsoft.com:RD" / "microsoft.com:LAMBDA_WF" etc.
+        const OUString aName = rAttribs.getString(XML_name, OUString());
+        if (!aName.isEmpty())
+        {
+            getWorkbookSettings().getExtDocOptions().GetDocSettings()
+                .maOoxCalcFeatures.push_back(aName);
+        }
     }
 
     return this;

@@ -20,6 +20,8 @@
 #include <memory>
 #include <utility>
 #include <xestyle.hxx>
+#include <document.hxx>
+#include <scextopt.hxx>
 
 #include <algorithm>
 #include <iterator>
@@ -991,7 +993,28 @@ void XclExpFont::SaveXml( XclExpXmlStream& rStrm )
     sax_fastparser::FSHelperPtr& rStyleSheet = rStrm.GetCurrentStream();
     rStyleSheet->startElement(XML_font);
     XclXmlUtils::WriteFontData( rStyleSheet, maData, XML_name );
-    // OOXTODO: XML_scheme; //scheme/@val values: "major", "minor", "none"
+
+    // Theme-binding round-trip: when source had <scheme val="..."/> on a
+    // font with this name (captured in ScExtDocSettings during xlsx
+    // import), re-emit it so Excel users who switch the workbook theme
+    // see the bound cells follow the new major/minor font. Without
+    // this, the round-trip hard-codes the name to whatever sc retained
+    // and theme changes have no effect.
+    const ScExtDocOptions* pExt = GetRoot().GetDoc().GetExtDocOptions();
+    if (pExt && !maData.maName.isEmpty())
+    {
+        const auto& rMap = pExt->GetDocSettings().maOoxFontSchemeByName;
+        auto it = rMap.find(maData.maName);
+        if (it != rMap.end())
+        {
+            const char* pSchemeVal = (it->second == XML_major) ? "major"
+                                  : (it->second == XML_minor) ? "minor"
+                                  : nullptr;
+            if (pSchemeVal)
+                rStyleSheet->singleElement(XML_scheme, XML_val, pSchemeVal);
+        }
+    }
+
     rStyleSheet->endElement( XML_font );
 }
 

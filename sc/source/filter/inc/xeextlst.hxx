@@ -188,6 +188,23 @@ private:
     OString maSyntax;
 };
 
+/** Emits the Excel 2019+ `<ext uri="{B58B0392-...}"><xcalcf:calcFeatures>`
+    block in workbook.xml/extLst. Carries the source `<xcalcf:feature
+    name="microsoft.com:RD"/>` etc. captured at xlsx import in
+    ScExtDocSettings::maOoxCalcFeatures, so downstream Excel readers
+    continue to see the feature-gating markers after a LO round-trip. */
+class XclExpExtCalcFeatures : public XclExpExt
+{
+public:
+    XclExpExtCalcFeatures( const XclExpRoot& rRoot, std::vector<OUString> aFeatures );
+    virtual void SaveXml( XclExpXmlStream& rStrm ) override;
+
+    virtual XclExpExtType GetType() override { return XclExpExtDataFooType; }
+
+private:
+    std::vector<OUString> maFeatures;
+};
+
 class XclExtLst : public XclExpRecordBase, public XclExpRoot
 {
 public:

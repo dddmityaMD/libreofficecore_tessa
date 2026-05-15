@@ -17,6 +17,7 @@
 #include <dpsave.hxx>
 #include <dputil.hxx>
 #include <document.hxx>
+#include <scextopt.hxx>
 #include <generalfunction.hxx>
 #include <unonames.hxx>
 #include <xestyle.hxx>
@@ -410,6 +411,22 @@ void XclExpXmlPivotCaches::SavePivotCacheXml( XclExpXmlStream& rStrm, const Entr
         pDefStrm->endElement(XML_fieldGroup);
     };
 
+    // SharePoint "unresolved template" placeholder strings from the
+    // source (xcalcf <s u="1"/>) — see ScExtDocSettings. ScDPCache
+    // strips these on import (they're never referenced from cacheRecords),
+    // so re-emit them as trailing entries on the first cacheField whose
+    // shared items get listed. Excel readers (and SharePoint regen
+    // tooling) see the placeholders by name even though they're not
+    // field-associated; the prefix convention `{*t_FieldName}` makes the
+    // intended field unambiguous.
+    const ScExtDocOptions* pExtOpt = GetDoc().GetExtDocOptions();
+    std::vector<OUString> aUnusedPending;
+    if (pExtOpt)
+    {
+        const auto& rSet = pExtOpt->GetDocSettings().maOoxPivotCacheUnusedStrings;
+        aUnusedPending.assign(rSet.begin(), rSet.end());
+    }
+
     for (size_t i = 0; i < nCount; ++i)
     {
         OUString aName = rCache.GetDimensionName(i);
@@ -526,7 +543,12 @@ void XclExpXmlPivotCaches::SavePivotCacheXml( XclExpXmlStream& rStrm, const Entr
 
         //if (bListItems) // see TODO above
         {
-            pAttList->add(XML_count, OString::number(static_cast<tools::Long>(rFieldItems.size())));
+            // First emitted field with shared items carries the SharePoint
+            // placeholders (see comment near aUnusedPending). Bump count
+            // accordingly so XML_count reflects the actual emitted entries.
+            const size_t nExtraUnused = aUnusedPending.size();
+            pAttList->add(XML_count, OString::number(
+                static_cast<tools::Long>(rFieldItems.size() + nExtraUnused)));
         }
 
         if (isLongText)
@@ -576,6 +598,21 @@ void XclExpXmlPivotCaches::SavePivotCacheXml( XclExpXmlStream& rStrm, const Entr
                         ;
                 }
             }
+            // Drain SharePoint placeholders into the first emitted
+            // sharedItems list — they're unreferenced by cacheRecords
+            // (Excel cacheRecords reference by index and never index
+            // past the original cache fill), so trailing them here is
+            // safe. Naming convention `{*t_FieldName}` lets downstream
+            // SharePoint/EOS regen tools associate each back to its
+            // source field by name without per-field tracking on our
+            // side. See ScExtDocSettings::maOoxPivotCacheUnusedStrings.
+            for (const OUString& rUnused : aUnusedPending)
+            {
+                pDefStrm->singleElement(XML_s,
+                    XML_v, rUnused.toUtf8(),
+                    XML_u, "1");
+            }
+            aUnusedPending.clear();
         }
 
         pDefStrm->endElement(XML_sharedItems);
