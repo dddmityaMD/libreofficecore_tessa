@@ -1232,26 +1232,34 @@ void XclExpXmlPivotTables::SavePivotTableXml( XclExpXmlStream& rStrm, const ScDP
     }
 
     sax_fastparser::FSHelperPtr& pPivotStrm = rStrm.GetCurrentStream();
-    pPivotStrm->startElement(XML_pivotTableDefinition,
-        XML_xmlns, rStrm.getNamespaceURL(OOX_NS(xls)).toUtf8(),
-        XML_name, rDPObj.GetName().toUtf8(),
-        XML_cacheId, OString::number(nCacheId),
-        XML_dataOnRows, ToPsz10(bDataOnRows),
-        XML_applyNumberFormats, ToPsz10(false),
-        XML_applyBorderFormats, ToPsz10(false),
-        XML_applyFontFormats, ToPsz10(false),
-        XML_applyPatternFormats, ToPsz10(false),
-        XML_applyAlignmentFormats, ToPsz10(false),
-        XML_applyWidthHeightFormats, ToPsz10(false),
-        XML_dataCaption, "Values",
-        XML_showDrill, ToPsz10(rSaveData.GetExpandCollapse()),
-        XML_useAutoFormatting, ToPsz10(false),
-        XML_itemPrintTitles, ToPsz10(true),
-        XML_indent, ToPsz10(false),
-        XML_outline, ToPsz10(!bTabularMode),
-        XML_outlineData, ToPsz10(!bTabularMode),
-        XML_compact, ToPsz10(bCompactMode),
-        XML_compactData, ToPsz10(bCompactMode));
+    auto pTableDefAttList = sax_fastparser::FastSerializerHelper::createAttrList();
+    pTableDefAttList->add(XML_xmlns, rStrm.getNamespaceURL(OOX_NS(xls)).toUtf8());
+    pTableDefAttList->add(XML_name, rDPObj.GetName().toUtf8());
+    pTableDefAttList->add(XML_cacheId, OString::number(nCacheId));
+    pTableDefAttList->add(XML_dataOnRows, ToPsz10(bDataOnRows));
+    pTableDefAttList->add(XML_applyNumberFormats, ToPsz10(false));
+    pTableDefAttList->add(XML_applyBorderFormats, ToPsz10(false));
+    pTableDefAttList->add(XML_applyFontFormats, ToPsz10(false));
+    pTableDefAttList->add(XML_applyPatternFormats, ToPsz10(false));
+    pTableDefAttList->add(XML_applyAlignmentFormats, ToPsz10(false));
+    pTableDefAttList->add(XML_applyWidthHeightFormats, ToPsz10(false));
+    {
+        const OUString& rDataCaption = rDPObj.GetDataCaption();
+        pTableDefAttList->add(XML_dataCaption,
+            rDataCaption.isEmpty() ? OString("Values") : rDataCaption.toUtf8());
+    }
+    pTableDefAttList->add(XML_showDrill, ToPsz10(rSaveData.GetExpandCollapse()));
+    pTableDefAttList->add(XML_useAutoFormatting, ToPsz10(false));
+    pTableDefAttList->add(XML_itemPrintTitles, ToPsz10(true));
+    pTableDefAttList->add(XML_indent, ToPsz10(false));
+    pTableDefAttList->add(XML_outline, ToPsz10(!bTabularMode));
+    pTableDefAttList->add(XML_outlineData, ToPsz10(!bTabularMode));
+    pTableDefAttList->add(XML_compact, ToPsz10(bCompactMode));
+    pTableDefAttList->add(XML_compactData, ToPsz10(bCompactMode));
+    if (!rDPObj.GetRowHeaderCaption().isEmpty())
+        pTableDefAttList->add(XML_rowHeaderCaption, rDPObj.GetRowHeaderCaption().toUtf8());
+    pTableDefAttList->add(XML_preserveFormatting, ToPsz10(true));
+    pPivotStrm->startElement(XML_pivotTableDefinition, pTableDefAttList);
 
     // NB: Excel's range does not include page field area (if any).
     ScRange aOutRange = rDPObj.GetOutputRangeByType(sheet::DataPilotOutputRangeType::TABLE);
@@ -1317,83 +1325,86 @@ void XclExpXmlPivotTables::SavePivotTableXml( XclExpXmlStream& rStrm, const ScDP
 
         sheet::DataPilotFieldOrientation eOrient = pDim->GetOrientation();
 
+        auto emitPivotField = [&](std::initializer_list<std::pair<sal_Int32, const char*>> extras) {
+            auto pAttList = sax_fastparser::FastSerializerHelper::createAttrList();
+            if (const auto& rLayoutName = pDim->GetLayoutName())
+                pAttList->add(XML_name, rLayoutName->toUtf8());
+            for (const auto& [nToken, pVal] : extras)
+                pAttList->add(nToken, pVal);
+            tools::Long nSubTotalCount = pDim->GetSubTotalsCount();
+            bool bHasDefaultSubtotal = false;
+            for (tools::Long n = 0; n < nSubTotalCount; ++n)
+            {
+                ScGeneralFunction eFunc = pDim->GetSubTotalFunc(n);
+                sal_Int32 nAttToken = GetSubtotalAttrToken(eFunc);
+                if (nAttToken == XML_defaultSubtotal)
+                    bHasDefaultSubtotal = true;
+                else if (!pAttList->hasAttribute(nAttToken))
+                    pAttList->add(nAttToken, ToPsz10(true));
+            }
+            if (!bHasDefaultSubtotal)
+                pAttList->add(XML_defaultSubtotal, ToPsz10(false));
+            pPivotStrm->singleElement(XML_pivotField, pAttList);
+        };
+
         if (eOrient == sheet::DataPilotFieldOrientation_HIDDEN)
         {
-            if(bDimInTabularMode)
-            {
-                pPivotStrm->singleElement(XML_pivotField,
-                    XML_compact, ToPsz10(false),
-                    XML_outline, ToPsz10(false),
-                    XML_showAll, ToPsz10(false));
-            }
+            if (bDimInTabularMode)
+                emitPivotField({{XML_compact, ToPsz10(false)},
+                                {XML_outline, ToPsz10(false)},
+                                {XML_showAll, ToPsz10(false)}});
+            else if (bDimInCompactMode)
+                emitPivotField({{XML_showAll, ToPsz10(false)}});
             else
-            {
-                if (bDimInCompactMode)
-                    pPivotStrm->singleElement(XML_pivotField,
-                        XML_showAll, ToPsz10(false));
-                else
-                    pPivotStrm->singleElement(XML_pivotField,
-                        XML_compact, ToPsz10(false),
-                        XML_showAll, ToPsz10(false));
-            }
+                emitPivotField({{XML_compact, ToPsz10(false)},
+                                {XML_showAll, ToPsz10(false)}});
             continue;
         }
 
         if (eOrient == sheet::DataPilotFieldOrientation_DATA)
         {
             const ScDPCache::CalculatedField* pCalcField = rCache.GetCalculatedFieldByName(pDim->GetName());
-            if(bDimInTabularMode)
+            if (bDimInTabularMode)
             {
                 if (!pCalcField)
-                {
-                    pPivotStrm->singleElement(XML_pivotField, XML_dataField, ToPsz10(true),
-                                              XML_compact, ToPsz10(false), XML_outline,
-                                              ToPsz10(false), XML_showAll, ToPsz10(false));
-                }
+                    emitPivotField({{XML_dataField, ToPsz10(true)},
+                                    {XML_compact, ToPsz10(false)},
+                                    {XML_outline, ToPsz10(false)},
+                                    {XML_showAll, ToPsz10(false)}});
                 else
-                {
-                    pPivotStrm->singleElement(XML_pivotField, XML_dataField, ToPsz10(true),
-                                              XML_dragToRow, ToPsz10(false), XML_dragToCol,
-                                              ToPsz10(false), XML_dragToPage, ToPsz10(false),
-                                              XML_compact, ToPsz10(false), XML_outline,
-                                              ToPsz10(false), XML_showAll, ToPsz10(false),
-                                              XML_defaultSubtotal, ToPsz10(false));
-                }
+                    emitPivotField({{XML_dataField, ToPsz10(true)},
+                                    {XML_dragToRow, ToPsz10(false)},
+                                    {XML_dragToCol, ToPsz10(false)},
+                                    {XML_dragToPage, ToPsz10(false)},
+                                    {XML_compact, ToPsz10(false)},
+                                    {XML_outline, ToPsz10(false)},
+                                    {XML_showAll, ToPsz10(false)}});
+            }
+            else if (bDimInCompactMode)
+            {
+                if (!pCalcField)
+                    emitPivotField({{XML_dataField, ToPsz10(true)},
+                                    {XML_showAll, ToPsz10(false)}});
+                else
+                    emitPivotField({{XML_dataField, ToPsz10(true)},
+                                    {XML_dragToRow, ToPsz10(false)},
+                                    {XML_dragToCol, ToPsz10(false)},
+                                    {XML_dragToPage, ToPsz10(false)},
+                                    {XML_showAll, ToPsz10(false)}});
             }
             else
             {
-                if (bDimInCompactMode)
-                {
-                    if (!pCalcField)
-                    {
-                        pPivotStrm->singleElement(XML_pivotField, XML_dataField, ToPsz10(true),
-                                                  XML_showAll, ToPsz10(false));
-                    }
-                    else
-                    {
-                        pPivotStrm->singleElement(XML_pivotField, XML_dataField, ToPsz10(true),
-                                                  XML_dragToRow, ToPsz10(false), XML_dragToCol,
-                                                  ToPsz10(false), XML_dragToPage, ToPsz10(false),
-                                                  XML_showAll, ToPsz10(false), XML_defaultSubtotal,
-                                                  ToPsz10(false));
-                    }
-                }
+                if (!pCalcField)
+                    emitPivotField({{XML_dataField, ToPsz10(true)},
+                                    {XML_compact, ToPsz10(false)},
+                                    {XML_showAll, ToPsz10(false)}});
                 else
-                {
-                    if (!pCalcField)
-                    {
-                        pPivotStrm->singleElement(XML_pivotField, XML_dataField, ToPsz10(true),
-                                                  XML_compact, ToPsz10(false), XML_showAll, ToPsz10(false));
-                    }
-                    else
-                    {
-                        pPivotStrm->singleElement(XML_pivotField, XML_dataField, ToPsz10(true),
-                                                  XML_dragToRow, ToPsz10(false), XML_dragToCol,
-                                                  ToPsz10(false), XML_dragToPage, ToPsz10(false),
-                                                  XML_compact, ToPsz10(false), XML_showAll, ToPsz10(false),
-                                                  XML_defaultSubtotal, ToPsz10(false));
-                    }
-                }
+                    emitPivotField({{XML_dataField, ToPsz10(true)},
+                                    {XML_dragToRow, ToPsz10(false)},
+                                    {XML_dragToCol, ToPsz10(false)},
+                                    {XML_dragToPage, ToPsz10(false)},
+                                    {XML_compact, ToPsz10(false)},
+                                    {XML_showAll, ToPsz10(false)}});
             }
             continue;
         }
@@ -1486,6 +1497,8 @@ void XclExpXmlPivotTables::SavePivotTableXml( XclExpXmlStream& rStrm, const ScDP
         }
 
         auto pAttList = sax_fastparser::FastSerializerHelper::createAttrList();
+        if (const auto& rLayoutName = pDim->GetLayoutName())
+            pAttList->add(XML_name, rLayoutName->toUtf8());
         pAttList->add(XML_axis, toOOXMLAxisType(eOrient));
         if (bAppearsInData)
             pAttList->add(XML_dataField, ToPsz10(true));
@@ -1539,6 +1552,17 @@ void XclExpXmlPivotTables::SavePivotTableXml( XclExpXmlStream& rStrm, const ScDP
             }
 
             pPivotStrm->endElement(XML_items);
+        }
+        if (pDim->GetRepeatItemLabels())
+        {
+            pPivotStrm->startElement(XML_extLst);
+            pPivotStrm->startElement(XML_ext,
+                FSNS(XML_xmlns, XML_x14), rStrm.getNamespaceURL(OOX_NS(xls14Lst)).toUtf8(),
+                XML_uri, OString("{2946ED86-A175-432a-8AC1-64E0C546D7DE}"));
+            pPivotStrm->singleElement(FSNS(XML_x14, XML_pivotField),
+                XML_fillDownLabels, ToPsz10(true));
+            pPivotStrm->endElement(XML_ext);
+            pPivotStrm->endElement(XML_extLst);
         }
         pPivotStrm->endElement(XML_pivotField);
     }

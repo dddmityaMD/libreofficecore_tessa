@@ -140,6 +140,7 @@ private:
 
     OUString maRowHeaderCaption;  // OOXML <x:pivotTableDefinition rowHeaderCaption="…">
     OUString maColHeaderCaption;  // OOXML <x:pivotTableDefinition colHeaderCaption="…">
+    OUString maDataCaption;       // OOXML <x:pivotTableDefinition dataCaption="…">
 
     sc::PivotTableStyleInfo maStyleInfo;
 
@@ -192,6 +193,9 @@ public:
     const OUString& GetRowHeaderCaption() const { return maRowHeaderCaption; }
     void SetColHeaderCaption(const OUString& rCaption) { maColHeaderCaption = rCaption; }
     const OUString& GetColHeaderCaption() const { return maColHeaderCaption; }
+    /// Override for the data-area "Values" caption (OOXML dataCaption attribute).
+    void SetDataCaption(const OUString& rCaption) { maDataCaption = rCaption; }
+    const OUString& GetDataCaption() const { return maDataCaption; }
 
     SC_DLLPUBLIC void   SetSheetDesc(const ScSheetSourceDesc& rDesc);
     void                SetImportDesc(const ScImportSourceDesc& rDesc);

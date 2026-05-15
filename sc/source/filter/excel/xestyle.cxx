@@ -3435,6 +3435,19 @@ XclExpXmlTableStyles::XclExpXmlTableStyles( const XclExpRoot& rRoot):
         }
     }
 
+    // Pivot tables can reference named table styles too via pivotTableStyleInfo.
+    // Without this loop, the imported style definition is dropped on save and
+    // the pivot consumer loses the header / wholeTable fill on reopen.
+    if (const ScDPCollection* pDPCollection = GetDoc().GetDPCollection())
+    {
+        for (size_t i = 0, n = pDPCollection->GetCount(); i < n; ++i)
+        {
+            const sc::PivotTableStyleInfo& rStyleInfo = (*pDPCollection)[i].getStyleInfo();
+            if (rStyleInfo.isSet() && pTableStyles->GetTableStyle(rStyleInfo.maName))
+                aTableStyleNames.insert(rStyleInfo.maName);
+        }
+    }
+
     for (const OUString& aTableStyleName : aTableStyleNames)
     {
         const ScTableStyle* pTableStyle = pTableStyles->GetTableStyle(aTableStyleName);

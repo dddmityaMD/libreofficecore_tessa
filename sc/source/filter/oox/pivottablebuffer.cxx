@@ -1449,6 +1449,7 @@ void PivotTable::finalizeImport()
         // multi-field "Row Labels" / "Column Labels" header cells.
         mpDPObject->SetRowHeaderCaption(maDefModel.maRowHeaderCaption);
         mpDPObject->SetColHeaderCaption(maDefModel.maColHeaderCaption);
+        mpDPObject->SetDataCaption(maDefModel.maDataCaption);
         mpDPObject->SetHideHeader(maLocationModel.mnFirstHeaderRow == 0);
         // OOXML <x:location firstDataRow="2"> = two-row header zone (button row + caption row).
         // BIFF importer does the equivalent at xipivot.cxx:1550. Without this, mnHeaderSize

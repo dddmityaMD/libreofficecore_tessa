@@ -336,6 +336,7 @@ ScDPObject::ScDPObject(const ScDPObject& rOther)
     , mbHideHeader(rOther.mbHideHeader)
     , maRowHeaderCaption(rOther.maRowHeaderCaption)
     , maColHeaderCaption(rOther.maColHeaderCaption)
+    , maDataCaption(rOther.maDataCaption)
     , maStyleInfo(rOther.maStyleInfo)
 {
     if (rOther.mpSaveData)
@@ -372,6 +373,7 @@ ScDPObject& ScDPObject::operator= (const ScDPObject& rOther)
         mbHideHeader = rOther.mbHideHeader;
         maRowHeaderCaption = rOther.maRowHeaderCaption;
         maColHeaderCaption = rOther.maColHeaderCaption;
+        maDataCaption = rOther.maDataCaption;
         maStyleInfo = rOther.maStyleInfo;
 
         if (rOther.mpSaveData)
